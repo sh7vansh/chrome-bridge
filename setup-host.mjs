@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ const EXTENSION_ID = 'nbghhppoiigjbdjbhefiaijofpnhgepb';
 const HOST_SCRIPT = join(__dirname, 'native-host.mjs');
 const MCP_SCRIPT = join(__dirname, 'mcp-server.mjs');
 
-console.log('🚀 Setting up Chrome Bridge & Agent Skill...\n');
+console.log('🚀 Setting up Chrome Bridge, Native Host & AI Agent MCP...\n');
 
 // 1. Register Native Messaging Host
 const manifest = {
@@ -29,23 +29,21 @@ const browserDirs = [
   join(homedir(), '.config', 'chromium', 'NativeMessagingHosts'),
   join(homedir(), '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts'),
   // macOS paths
-  join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts')
+  join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts'),
+  join(homedir(), 'Library', 'Application Support', 'Chromium', 'NativeMessagingHosts'),
+  join(homedir(), 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts')
 ];
 
-let hostRegistered = false;
 for (const dir of browserDirs) {
   try {
     mkdirSync(dir, { recursive: true });
     const targetPath = join(dir, `${HOST_NAME}.json`);
     writeFileSync(targetPath, JSON.stringify(manifest, null, 2));
     console.log(`✅ Registered Native Host: ${targetPath}`);
-    hostRegistered = true;
-  } catch (err) {
-    // Ignore missing parent directories
-  }
+  } catch {}
 }
 
-// 2. Install Agent Skill into user's ~/.agent/skills
+// 2. Install Agent Skill into ~/.agent/skills
 const skillSource = join(__dirname, 'skills', 'chrome-bridge', 'SKILL.md');
 if (existsSync(skillSource)) {
   const skillDestDir = join(homedir(), '.agent', 'skills', 'chrome-bridge');
@@ -58,15 +56,50 @@ if (existsSync(skillSource)) {
   }
 }
 
-console.log('\n🎉 Setup complete!\n');
-console.log('--- AI Client Configuration ---');
-console.log('Add this block to your MCP config (e.g. ~/.agent/mcp_config.json or claude_desktop_config.json):\n');
-console.log(JSON.stringify({
-  mcpServers: {
-    "chrome-bridge": {
-      "command": "node",
-      "args": [MCP_SCRIPT]
+// 3. Automatically update MCP configurations
+function updateMcpConfig(filePath) {
+  try {
+    let config = { mcpServers: {} };
+    if (existsSync(filePath)) {
+      try {
+        const raw = readFileSync(filePath, 'utf8');
+        config = JSON.parse(raw) || { mcpServers: {} };
+        if (!config.mcpServers) config.mcpServers = {};
+      } catch {
+        config = { mcpServers: {} };
+      }
+    } else {
+      mkdirSync(dirname(filePath), { recursive: true });
     }
+
+    config.mcpServers['chrome-bridge'] = {
+      command: 'node',
+      args: [MCP_SCRIPT]
+    };
+
+    writeFileSync(filePath, JSON.stringify(config, null, 2) + '\n');
+    console.log(`✅ Auto-configured MCP Server: ${filePath}`);
+    return true;
+  } catch (err) {
+    console.warn(`⚠️ Could not update ${filePath}:`, err.message);
+    return false;
   }
-}, null, 2));
-console.log('\n-------------------------------\n');
+}
+
+// Update Antigravity / Gemini CLI MCP config
+updateMcpConfig(join(homedir(), '.agent', 'mcp_config.json'));
+
+// Update Claude Desktop config if installed
+const claudePaths = [
+  join(homedir(), '.config', 'Claude', 'claude_desktop_config.json'),
+  join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+  join(homedir(), 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
+];
+
+for (const p of claudePaths) {
+  if (existsSync(dirname(p))) {
+    updateMcpConfig(p);
+  }
+}
+
+console.log('\n🎉 Setup complete! Chrome Bridge is fully configured for your AI assistants.');

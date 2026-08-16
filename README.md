@@ -20,37 +20,28 @@ A lightweight, zero-configuration Model Context Protocol (MCP) server and Chrome
 
 ---
 
-## 📦 How to Share & Install
+## 📦 Quick Start & Installation
 
-### 1. Register Native Messaging Host
+### 1. Run Setup (Automated)
 ```bash
+git clone https://github.com/sh7vansh/chrome-bridge.git
+cd chrome-bridge
+npm install
 npm run setup
 ```
-*(This registers the native messaging manifest with Chrome/Chromium/Brave)*
+> **What `npm run setup` does automatically:**
+> - Registers the Native Messaging Host in Chrome, Chromium, and Brave.
+> - Automatically installs the Agent Skill into `~/.agent/skills/chrome-bridge/SKILL.md`.
+> - Automatically configures the MCP Server in `~/.agent/mcp_config.json` and Claude Desktop.
 
 ### 2. Load the Chrome Extension
 1. Open Google Chrome and go to `chrome://extensions`.
 2. Enable **Developer mode** (toggle in top right).
-3. Click **Load unpacked** and select the `extension/` folder.
+3. Click **Load unpacked** and select the `chrome-bridge/extension` folder.
 4. The extension icon will appear in your toolbar showing **`🟢 Native Bridge`**.
 
-### 2. Configure Your AI Client (Antigravity, Claude, Cursor)
-
-Add the MCP server to your MCP configuration (e.g. `~/.agent/mcp_config.json` or `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "chrome-bridge": {
-      "command": "node",
-      "args": ["/path/to/antigravity-chrome-bridge/mcp-server.mjs"]
-    }
-  }
-}
-```
-
 ### 3. That's It!
-Whenever your AI agent needs to interact with your browser, it will spawn the MCP server on demand. When your session ends, the process terminates and frees all resources.
+Your AI assistant (Antigravity, Claude, Cursor) now has full native browser automation tools enabled. Run `npm test` anytime to verify the 12-tool test suite.
 
 ---
 
