@@ -309,34 +309,40 @@ class ChromeSocketClient:
 
 
 class Tab:
-    """Scoped browser tab handle."""
+    """Scoped browser tab handle and procedural action context."""
 
     def __init__(
         self,
-        tab_id: int,
-        client: ChromeSocketClient,
+        tab_id: Optional[int] = None,
+        client: Optional[ChromeSocketClient] = None,
         title: str = "",
         url: str = "",
         active: bool = False,
     ):
         self.id = tab_id
-        self._client = client
+        self._client = client or ChromeSocketClient()
         self.title = title
         self.url = url
         self.active = active
 
     def __repr__(self) -> str:
-        return f'<Tab id={self.id} title="{self.title}" url="{self.url}" active={self.active}>'
+        tab_id_repr = self.id if self.id is not None else "active"
+        return f'<Tab id={tab_id_repr} title="{self.title}" url="{self.url}" active={self.active}>'
 
     @property
     def info(self) -> Dict[str, Any]:
         """Fetch live metadata (url, title, active status) for this tab."""
         tabs = self._client.call("list_tabs")
         for t in tabs:
-            if t.get("id") == self.id:
+            if self.id is not None and t.get("id") == self.id:
                 self.title = t.get("title", "")
                 self.url = t.get("url", "")
                 self.active = t.get("active", False)
+                return t
+            elif self.id is None and t.get("active", False):
+                self.title = t.get("title", "")
+                self.url = t.get("url", "")
+                self.active = True
                 return t
         return {"id": self.id, "title": self.title, "url": self.url, "active": self.active}
 
@@ -462,11 +468,14 @@ class Tab:
         )
 
 
-class Chrome:
+class Chrome(Tab):
     """Global Chrome singleton providing fluent active tab control and tab management."""
 
     def __init__(self, client: Optional[ChromeSocketClient] = None):
-        self._client = client or ChromeSocketClient()
+        super().__init__(tab_id=None, client=client or ChromeSocketClient(), active=True)
+
+    def __repr__(self) -> str:
+        return "<Chrome active_tab_context>"
 
     @property
     def tabs(self) -> List[Tab]:
@@ -513,64 +522,7 @@ class Chrome:
         """Check browser connection status."""
         return self._client.call("ping")
 
-    # Delegate active tab methods
-    def snapshot(self, compact: bool = True) -> str:
-        return self.active_tab.snapshot(compact=compact)
-
-    def click(self, target: TargetLocator, button: str = "left", count: int = 1) -> Dict[str, Any]:
-        return self.active_tab.click(target=target, button=button, count=count)
-
-    def type(
-        self,
-        target: TargetLocator,
-        text: str,
-        clear: bool = True,
-        press_enter: bool = False,
-    ) -> Dict[str, Any]:
-        return self.active_tab.type(target=target, text=text, clear=clear, press_enter=press_enter)
-
-    def press_key(self, key: str) -> Dict[str, Any]:
-        return self.active_tab.press_key(key=key)
-
-    def select(self, target: TargetLocator, value: str) -> Dict[str, Any]:
-        return self.active_tab.select(target=target, value=value)
-
-    def hover(self, target: TargetLocator) -> Dict[str, Any]:
-        return self.active_tab.hover(target=target)
-
-    def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
-        return self.active_tab.scroll(x=x, y=y, target=target)
-
-    def get_text(self, target: TargetLocator) -> str:
-        return self.active_tab.get_text(target=target)
-
-    def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
-        return self.active_tab.get_attribute(target=target, name=name)
-
-    def eval_js(self, script: str, target: Optional[TargetLocator] = None) -> Any:
-        return self.active_tab.eval_js(script=script, target=target)
-
-    def screenshot(self, path: Optional[str] = None) -> str:
-        return self.active_tab.screenshot(path=path)
-
-    def wait_for(self, target: TargetLocator, timeout: float = 10.0, state: str = "visible") -> bool:
-        return self.active_tab.wait_for(target=target, timeout=timeout, state=state)
-
-    def wait_for_url(self, pattern: str, timeout: float = 15.0) -> bool:
-        return self.active_tab.wait_for_url(pattern=pattern, timeout=timeout)
-
-    def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
-        return self.active_tab.navigate(url=url, timeout=timeout)
-
-    def back(self) -> Dict[str, Any]:
-        return self.active_tab.back()
-
-    def forward(self) -> Dict[str, Any]:
-        return self.active_tab.forward()
-
-    def reload(self, bypass_cache: bool = False) -> Dict[str, Any]:
-        return self.active_tab.reload(bypass_cache=bypass_cache)
-
 
 # Default global instance
 chrome = Chrome()
+

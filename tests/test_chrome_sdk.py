@@ -64,17 +64,31 @@ def test_tab_type_action():
     )
 
 
-def test_chrome_singleton_delegates_to_active_tab():
+def test_chrome_singleton_dispatches_single_roundtrip_action():
+    client = MagicMock()
+    client.call.return_value = {"snapshot": 'PAGE: "Active Tab"\n- button [#1] "Submit"', "totalInteractive": 1}
+
+    chrome = Chrome(client=client)
+    snapshot = chrome.snapshot()
+
+    assert "- button [#1]" in snapshot
+    # Verifies single-roundtrip optimization (tabId=None) without redundant list_tabs call
+    client.call.assert_called_once_with("get_page_content", {"tabId": None, "compact": True})
+
+
+def test_chrome_active_tab_resolves_scoped_handle():
     client = MagicMock()
     client.call.side_effect = [
         # list_tabs response
         [{"id": 10, "title": "Active Tab", "url": "https://example.com", "active": True}],
-        # snapshot response
+        # snapshot response on scoped tab
         {"snapshot": 'PAGE: "Active Tab"\n- button [#1] "Submit"', "totalInteractive": 1},
     ]
 
     chrome = Chrome(client=client)
-    snapshot = chrome.snapshot()
+    scoped_tab = chrome.active_tab
+    assert scoped_tab.id == 10
+    snapshot = scoped_tab.snapshot()
 
     assert "- button [#1]" in snapshot
     assert client.call.call_count == 2

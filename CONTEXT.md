@@ -38,6 +38,14 @@ _Avoid_: Target query, element selector string, node specifier
 An object-oriented handle representing a specific browser tab, providing scoped browser actions and state inspection independent of the active tab.
 _Avoid_: Window frame, tab instance pointer, browser page object
 
+**Tab Context**:
+The unified operational scope (an explicit Tab Handle with an integer ID, or the default active tab context with implicit ID resolution) that dispatches procedural actions in a single IPC roundtrip.
+_Avoid_: Session scope, context wrapper, execution target
+
+**In-Page DOM Engine**:
+The isolated execution module injected into web pages by the Chrome extension, responsible for Semantic DOM Snapshot generation, accessibility tree traversal, Ref-ID indexing, and pointer hit-testing verification.
+_Avoid_: Content script injector, page crawler, DOM scraper
+
 **Diagnostic Auto-Snapshot**:
 A token-budgeted Semantic DOM Snapshot automatically injected into action failure exception payloads to facilitate single-turn Driver self-healing.
 _Avoid_: Error snapshot, debug dump, recovery screenshot
@@ -60,4 +68,6 @@ _Avoid_: Element marker, bounding box injector, visual debugger
 1. **Zero Information Leakage**: The Driver interface (`execute_python`) and all associated error exceptions must never expose internal transport mechanics, socket paths, Native Messaging hosts, or Manifest V3 background workers.
 2. **Encapsulated Diagnostics**: All failure modes must resolve to high-level domain exceptions (`BrowserUnavailableError`, `ElementNotFoundError`, `ActionInterceptionError`, `NavigationTimeoutError`) equipped with self-healing Semantic DOM auto-snapshots.
 3. **Pristine Tracebacks**: Execution stack traces must strictly filter out internal socket/IPC mechanics, surfacing only user `<repl>` frames and public `chrome.*` methods.
+4. **Single-Roundtrip Action Dispatch**: Procedural actions dispatched against top-level `chrome` or scoped `Tab` handles must never incur secondary discovery roundtrips (`list_tabs`) for active tab resolution.
+5. **Decoupled DOM Execution**: In-page DOM inspection, snapshotting, and hit-testing logic must remain strictly decoupled from background transport routing.
 
