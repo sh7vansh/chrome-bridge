@@ -8,9 +8,9 @@ Welcome to **Chrome Bridge** — a stateful, in-memory bridge between AI agents 
 - Whenever the user asks to inspect open tabs, read active pages, navigate, click, fill forms, extract data from their active browser session, or automate web workflows, **always activate the `chrome-bridge` skill**.
 - **Do NOT fallback** to static HTTP fetch tools (`read_url_content`, `curl`) when interacting with the user's live browser, logged-in sessions, or multi-step web interactions.
 - **Dynamic Execution Dispatch:**
-  - **Inline (Main turn):** Simple queries, checking tabs/status, single-page snapshots, and 1–2 direct atomic actions.
-  - **Dedicated Subagent (`chrome_worker`):** Multi-step workflows, pagination/scraping across multiple pages, cross-tab comparisons, or exploratory tasks with DOM retry loops to keep the main context clean.
-- Interact with the browser using the synchronous `chrome` instance in `chrome_sdk.py` or the Python REPL runtime.
+  - **Inline (Main turn):** Simple queries, checking tabs/status, single-page snapshots, and 1–2 direct atomic actions via `execute_python`.
+  - **Dedicated Subagent (`chrome_worker`):** Multi-step workflows, pagination/scraping across multiple pages, cross-tab comparisons, or exploratory tasks with DOM retry loops via `execute_python` with `enable_mcp_tools=True`.
+- Always execute browser actions via the **`execute_python`** MCP tool (from the `chrome-bridge` server). Do not invoke terminal commands (`run_command`) in external project directories.
 
 ### 2. Python Runtime & Architecture
 - **Runtime:** Python 3.11+ with dependencies in `requirements.txt` / `pyproject.toml`.

@@ -29,10 +29,11 @@ Choose dynamically between **Inline Execution** and a **Dedicated Subagent** bas
                - Quick read/evaluation         - DOM retry & exploration loops
 ```
 
-### 1. Cross-Platform Execution
-Run Python code via the persistent REPL or resolved executable:
-- **Linux/macOS:** `.venv/bin/python -c "..."` or `python3 repl_engine.py -c "..."`
-- **Windows:** `.venv\Scripts\python.exe -c "..."` or `py -3 repl_engine.py -c "..."`
+### 1. Execution Method
+Always run Python snippets using the **`execute_python`** MCP tool (from the `chrome-bridge` server).
+- **Tool call:** `execute_python(code="...")` (or `call_mcp_tool(ServerName="chrome-bridge", ToolName="execute_python", Arguments={"code": "..."})`)
+- **DO NOT** execute Python via the system terminal or `run_command`. The `chrome_sdk` and persistent browser session are pre-loaded directly inside the `chrome-bridge` MCP server.
+- The standard library `chrome` instance is pre-injected into the session namespace. Variables, functions, and state persist across turns.
 
 ---
 
@@ -43,11 +44,12 @@ For complex or multi-step workflows, spawn `chrome_worker` to keep parent contex
 define_subagent(
     name="chrome_worker",
     description="Dedicated subagent to execute browser automation workflows via Chrome Bridge.",
-    system_prompt="""Control the live Chrome browser via Python `chrome_sdk`.
-- Execute via `.venv/bin/python` (Linux/macOS) or `.venv\\Scripts\\python.exe` (Windows), or `python repl_engine.py -c "..."`.
-- Always import `chrome_sdk` and use `chrome = chrome_sdk.chrome`.
+    system_prompt="""Control the live Chrome browser via the `execute_python` tool on the `chrome-bridge` MCP server.
+- Execute Python snippets via `execute_python(code="...")`. Do not use terminal run_command.
+- The synchronous `chrome` object is pre-injected in the REPL session.
 - Use `chrome.snapshot()` to get [#N] element Ref-IDs, perform actions, and wait for navigation.
 - Return a concise, structured markdown report. Do not dump raw HTML or large DOM snapshots.""",
+    enable_mcp_tools=True,
     enable_write_tools=True
 )
 
