@@ -6,9 +6,11 @@ from chrome_sdk import (
     Tab,
     normalize_locator,
     ChromeBridgeError,
+    BrowserUnavailableError,
     ElementNotFoundError,
     ActionInterceptionError,
     NavigationTimeoutError,
+    ChromeSocketClient,
 )
 
 
@@ -76,3 +78,22 @@ def test_chrome_singleton_delegates_to_active_tab():
 
     assert "- button [#1]" in snapshot
     assert client.call.call_count == 2
+
+
+def test_browser_unavailable_error_subclasses_chrome_bridge_error():
+    err = BrowserUnavailableError("Browser session is not reachable.")
+    assert isinstance(err, ChromeBridgeError)
+    assert "not reachable" in str(err)
+
+
+def test_socket_connection_failure_raises_browser_unavailable_error():
+    client = ChromeSocketClient(socket_path="/tmp/nonexistent_test_socket.sock")
+    with pytest.raises(BrowserUnavailableError) as exc_info:
+        client.connect(retries=1, backoff=0.01)
+    
+    err_str = str(exc_info.value).lower()
+    assert "browser" in err_str
+    # Verify zero leakage of internal terms
+    for forbidden in ["extension", "socket", "/tmp/", "native-host", "manifest"]:
+        assert forbidden not in err_str, f"Forbidden term '{forbidden}' leaked in error message: {err_str}"
+

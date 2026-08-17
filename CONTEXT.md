@@ -46,3 +46,13 @@ _Avoid_: Error snapshot, debug dump, recovery screenshot
 An overlapping DOM node (such as a modal backdrop, sticky header, or cookie consent overlay) that obstructs pointer hit-testing coordinates during user interaction attempts.
 _Avoid_: Blocking element, overlay blocker, click blocker
 
+**Browser Unavailable**:
+The domain state when the browser session is closed, unreachable, or disconnected, signaled to the Driver via `BrowserUnavailableError`.
+_Avoid_: Socket error, host down, extension dead
+
+## Abstraction Seam Guarantees
+
+1. **Zero Information Leakage**: The Driver interface (`execute_python`) and all associated error exceptions must never expose internal transport mechanics, socket paths, Native Messaging hosts, or Manifest V3 background workers.
+2. **Encapsulated Diagnostics**: All failure modes must resolve to high-level domain exceptions (`BrowserUnavailableError`, `ElementNotFoundError`, `ActionInterceptionError`, `NavigationTimeoutError`) equipped with self-healing Semantic DOM auto-snapshots.
+3. **Pristine Tracebacks**: Execution stack traces must strictly filter out internal socket/IPC mechanics, surfacing only user `<repl>` frames and public `chrome.*` methods.
+

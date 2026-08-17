@@ -252,10 +252,25 @@ class PythonReplSession:
 
     def _sanitize_traceback(self, exc: BaseException) -> str:
         tb = exc.__traceback__
-        # Filter down to frames from <repl> or user code
-        while tb and tb.tb_frame.f_code.co_filename != "<repl>" and "chrome_sdk.py" not in tb.tb_frame.f_code.co_filename:
-            tb = tb.tb_next
+        if not tb:
+            return "".join(traceback.format_exception_only(type(exc), exc))
 
-        if tb:
-            return "".join(traceback.format_exception(type(exc), exc, tb))
+        extracted = traceback.extract_tb(tb)
+        clean_frames = []
+        for frame in extracted:
+            fn = frame.filename
+            if fn == "<repl>":
+                clean_frames.append(frame)
+            elif "chrome_sdk.py" in fn:
+                # Include high-level public methods, exclude socket client / IPC internals
+                if frame.name not in ("call", "connect", "_raise_structured_error", "close"):
+                    clean_frames.append(frame)
+            elif not fn.startswith("<") and "site-packages" not in fn and "lib/python" not in fn:
+                clean_frames.append(frame)
+
+        if clean_frames:
+            formatted_tb = "".join(traceback.format_list(clean_frames))
+            exc_only = "".join(traceback.format_exception_only(type(exc), exc))
+            return f"Traceback (most recent call last):\n{formatted_tb}{exc_only}"
+
         return "".join(traceback.format_exception_only(type(exc), exc))

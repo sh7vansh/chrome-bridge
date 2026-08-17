@@ -19,9 +19,16 @@ from repl_engine import PythonReplSession
 mcp = FastMCP(
     name="chrome-bridge",
     instructions=(
-        "You have full procedural control over the user's active Google Chrome browser via the 'execute_python' tool.\n"
-        "Always start by calling `chrome.snapshot()` to inspect the current page's interactive elements and Ref-IDs (`[#1]`, `[#2]`).\n"
-        "Use `chrome.click(ref)` and `chrome.type(ref, text)` to interact directly with elements by their Ref-ID."
+        "You have full procedural control over the user's active Google Chrome browser via the 'execute_python' tool.\n\n"
+        "ENVIRONMENT CAPABILITIES:\n"
+        "- Persistent Python REPL: Variables, imports, helper functions, and state persist across successive calls.\n"
+        "- Injected SDK: The synchronous `chrome` module is pre-injected and ready to use.\n\n"
+        "RECOMMENDED WORKFLOW:\n"
+        "1. Orientation: Always inspect the page with `print(chrome.snapshot())` to obtain the Semantic DOM outline and element Ref-IDs (`[#1]`, `[#2]`).\n"
+        "2. Targeted Actions: Interact polymorphically using Ref-IDs or selectors, e.g. `chrome.click(14)`, `chrome.type('[#2]', 'search query', press_enter=True)`.\n"
+        "3. Multi-Step Subroutines: Write complete loops and workflows (form fills, pagination, data extraction) in a single script for high throughput.\n"
+        "4. Synchronization: Use `chrome.wait_for('[#5]')` and `chrome.wait_for_url(r'...')` to handle dynamic page changes.\n"
+        "5. Self-Healing: If an element is not found, inspect the automatic `[diagnostic_auto_snapshot]` or fuzzy match suggestions in the error payload."
     ),
 )
 

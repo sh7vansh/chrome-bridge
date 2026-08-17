@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+/**
+ * Internal Diagnostic Fixture - Granular RPC Testing MCP Server
+ * NOTE: For AI Agent Drivers, the canonical interface is mcp_server.py (execute_python).
+ */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';

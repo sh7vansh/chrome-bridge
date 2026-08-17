@@ -20,6 +20,13 @@ class ChromeBridgeError(Exception):
         self.auto_snapshot: Optional[str] = None
 
 
+class BrowserUnavailableError(ChromeBridgeError):
+    """Raised when the browser is not running, unreachable, or disconnected."""
+
+    def __init__(self, message: str = "Browser instance is not reachable or session disconnected.", tab_id: Optional[int] = None):
+        super().__init__(message, tab_id)
+
+
 class ElementNotFoundError(ChromeBridgeError):
     """Raised when a Ref-ID or CSS selector cannot be located."""
 
@@ -163,9 +170,8 @@ class ChromeSocketClient:
                 return
             except (socket.error, FileNotFoundError) as err:
                 if i == retries - 1:
-                    raise ChromeBridgeError(
-                        f"Could not connect to Chrome Bridge at {self.socket_path}. "
-                        "Make sure Google Chrome is running and the Chrome Bridge extension is enabled."
+                    raise BrowserUnavailableError(
+                        "Browser instance is not reachable or session disconnected."
                     ) from err
                 time.sleep(backoff * (i + 1))
 
@@ -208,7 +214,7 @@ class ChromeSocketClient:
 
                 chunk = self._sock.recv(65536)
                 if not chunk:
-                    raise ChromeBridgeError("Native socket closed unexpectedly.")
+                    raise BrowserUnavailableError("Browser session disconnected unexpectedly.")
                 self._buffer += chunk
 
         except socket.timeout:
@@ -222,7 +228,7 @@ class ChromeSocketClient:
             if isinstance(e, ChromeBridgeError):
                 raise
             self.close()
-            raise ChromeBridgeError(f"IPC communication error during '{action}': {str(e)}") from e
+            raise BrowserUnavailableError(f"Browser communication error during '{action}': {str(e)}") from e
 
     def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
         err_data = resp.get("error")
@@ -467,12 +473,12 @@ class Chrome:
         return Tab(tab_id=res.get("tabId"), client=self._client, url=res.get("url", url), active=True)
 
     def ping(self) -> Dict[str, Any]:
-        """Ping the native host and extension."""
+        """Ping the active browser session."""
         return self._client.call("ping")
 
     @property
     def status(self) -> Dict[str, Any]:
-        """Check bridge and extension connection status."""
+        """Check browser connection status."""
         return self._client.call("ping")
 
     # Delegate active tab methods

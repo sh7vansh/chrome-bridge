@@ -105,3 +105,26 @@ def test_hard_character_cap_head_and_tail():
     assert "omitted" in formatted
     assert formatted.startswith("[result]")
     assert len(formatted) <= 800
+
+
+def test_traceback_sanitization_removes_internal_frames():
+    from unittest.mock import MagicMock
+    from chrome_sdk import Chrome, BrowserUnavailableError
+
+    # Create a mock socket client that raises BrowserUnavailableError from inside its internal call
+    mock_client = MagicMock()
+    mock_client.call.side_effect = BrowserUnavailableError("Browser instance is not reachable or session disconnected.")
+
+    mock_chrome = Chrome(client=mock_client)
+    session = PythonReplSession(globals_dict={"chrome": mock_chrome})
+
+    out = session.execute("chrome.snapshot()")
+    assert "[error]" in out
+    assert "BrowserUnavailableError" in out
+    assert "[stderr]" in out
+    
+    # Assert traceback includes the <repl> line and doesn't leak internal client/socket method frames
+    assert "<repl>" in out
+    for forbidden in ["ChromeSocketClient", "_raise_structured_error", "socket.py", "net.connect"]:
+        assert forbidden not in out, f"Internal frame '{forbidden}' leaked in output: {out}"
+
