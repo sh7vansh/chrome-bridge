@@ -105,3 +105,23 @@ def test_default_socket_path_resolution():
     expected = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
     assert DEFAULT_SOCKET_PATH == expected
 
+
+def test_browser_unavailable_actionable_checklist_zero_leakage():
+    from chrome_sdk import DEFAULT_BROWSER_UNAVAILABLE_MSG
+    assert "Troubleshooting checklist" in DEFAULT_BROWSER_UNAVAILABLE_MSG
+    assert "Ensure Google Chrome" in DEFAULT_BROWSER_UNAVAILABLE_MSG
+    assert "setup" in DEFAULT_BROWSER_UNAVAILABLE_MSG
+    lower_msg = DEFAULT_BROWSER_UNAVAILABLE_MSG.lower()
+    for forbidden in ["extension", "socket", "/tmp/", "native-host", "manifest"]:
+        assert forbidden not in lower_msg, f"Forbidden term '{forbidden}' leaked in checklist: {DEFAULT_BROWSER_UNAVAILABLE_MSG}"
+
+
+def test_manifest_pinned_key_matches_expected_extension_id():
+    import json
+    import os
+    manifest_path = os.path.join(os.path.dirname(__file__), "..", "extension", "manifest.json")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert "key" in manifest
+    assert len(manifest["key"]) > 100
+

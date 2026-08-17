@@ -23,12 +23,21 @@ class ChromeBridgeError(Exception):
         self.auto_snapshot: Optional[str] = None
 
 
+DEFAULT_BROWSER_UNAVAILABLE_MSG = (
+    "Browser instance is not reachable or session disconnected.\n\n"
+    "Troubleshooting checklist:\n"
+    "  1. Ensure Google Chrome is open and running.\n"
+    "  2. Verify Antigravity Chrome Bridge is active in Chrome.\n"
+    "  3. Re-run setup on this machine: npx antigravity-chrome-bridge setup"
+)
+
+
 class BrowserUnavailableError(ChromeBridgeError):
     """Raised when the browser is not running, unreachable, or disconnected."""
 
     def __init__(
         self,
-        message: str = "Browser instance is not reachable or session disconnected. Please ensure Chrome is running and Chrome Bridge is active.",
+        message: str = DEFAULT_BROWSER_UNAVAILABLE_MSG,
         tab_id: Optional[int] = None,
     ):
         super().__init__(message, tab_id)

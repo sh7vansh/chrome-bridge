@@ -4,6 +4,7 @@
   "description": "Chrome Bridge 2.0 - Persistent Python REPL Runtime & Chrome Extension for AI browser automation",
   "type": "module",
   "bin": {
+    "antigravity-chrome-bridge": "./setup-host.mjs",
     "chrome-bridge": "./setup-host.mjs"
   },
   "scripts": {

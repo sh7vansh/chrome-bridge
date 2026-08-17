@@ -49,6 +49,15 @@ function resolvePython() {
     if (!isWindows && existsSync(venvPythonPosix)) return venvPythonPosix;
   } catch (err) {
     console.warn('⚠️ Could not automatically provision .venv:', err.message);
+    console.warn('\nTo install Python 3.11+:');
+    if (isWindows) {
+      console.warn('  👉 winget install Python.Python.3.11');
+    } else if (platform() === 'darwin') {
+      console.warn('  👉 brew install python@3.11');
+    } else {
+      console.warn('  👉 sudo apt update && sudo apt install python3-venv python3-pip');
+    }
+    console.warn('');
   }
 
   // Fallback to system python
