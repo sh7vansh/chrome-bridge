@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Chrome Bridge - Windows Setup & Diagnostics Script
+    Chrome Bridge 2.0 - Windows Setup & Diagnostics Script
 .DESCRIPTION
-    Automates dependency checks (Node.js, Python/uv), virtual environment setup,
+    Automates Windows environment checks (Node.js, Python/uv), virtual environment setup,
     Chrome Native Messaging Host registration, MCP configuration, and self-testing.
 .PARAMETER SkipTests
-    Skip running the test suite after setup.
+    Skip running the automated test suite after setup.
 .PARAMETER Reinstall
     Force recreate the Python virtual environment (.venv) from scratch.
 .EXAMPLE
@@ -24,34 +24,42 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
+function Write-Header {
+    param([string]$Title)
+    Write-Host "`n================================================================" -ForegroundColor Cyan
+    Write-Host "   $Title" -ForegroundColor Cyan
+    Write-Host "================================================================" -ForegroundColor Cyan
+}
+
 function Write-Step {
     param([string]$Message)
-    Write-Host "`n[$([char]0x2192)] $Message" -ForegroundColor Cyan
+    Write-Host "`n[$([char]0x2192)] $Message" -ForegroundColor Yellow
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host " [OK] $Message" -ForegroundColor Green
+    Write-Host "  [✓] $Message" -ForegroundColor Green
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host " [!] $Message" -ForegroundColor Yellow
+    Write-Host "  [!] $Message" -ForegroundColor Yellow
 }
 
 function Write-Err {
     param([string]$Message)
-    Write-Host " [x] $Message" -ForegroundColor Red
+    Write-Host "  [x] $Message" -ForegroundColor Red
 }
 
-Write-Host @"
-======================================================
-  🚀 Chrome Bridge - Windows Setup v2.0   
-======================================================"
-"@ -ForegroundColor Magenta
+Write-Header "🚀 Chrome Bridge 2.0 — Windows Setup Assistant"
+
+Write-Host "`n📋 System Environment Check:" -ForegroundColor White
+Write-Host "  • Working Directory: $ScriptDir" -ForegroundColor Gray
+Write-Host "  • PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Gray
+Write-Host "  • Operating System:  $([System.Environment]::OSVersion.VersionString)" -ForegroundColor Gray
 
 # --- 1. Validate Node.js ---
-Write-Step "Checking Node.js environment..."
+Write-Step "[1/4] Validating Node.js Runtime..."
 $nodeCmd = Get-Command "node" -ErrorAction SilentlyContinue
 if (-not $nodeCmd) {
     Write-Err "Node.js is not found in PATH."
@@ -60,16 +68,16 @@ if (-not $nodeCmd) {
     exit 1
 }
 $nodeVersion = (node --version).Trim()
-Write-Success "Node.js $nodeVersion detected."
+Write-Success "Node.js $nodeVersion detected at: $($nodeCmd.Source)"
 
 # --- 2. Validate Python / uv ---
-Write-Step "Checking Python runtime & package managers..."
+Write-Step "[2/4] Validating Python Runtime & Package Managers..."
 $hasUv = [bool](Get-Command "uv" -ErrorAction SilentlyContinue)
 $pythonExe = $null
 
 if ($hasUv) {
     $uvVersion = (uv --version).Trim()
-    Write-Success "Fast package manager detected: $uvVersion"
+    Write-Success "Fast installer detected: $uvVersion"
 }
 
 # Resolve system python
@@ -97,7 +105,7 @@ if (-not $pythonExe -and -not $hasUv) {
 }
 
 # --- 3. Provision Virtual Environment (.venv) ---
-Write-Step "Configuring Python virtual environment (.venv)..."
+Write-Step "[3/4] Provisioning Python Virtual Environment (.venv)..."
 $venvDir = Join-Path $ScriptDir ".venv"
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
@@ -130,7 +138,7 @@ if (Test-Path $venvPython) {
 }
 
 # --- 4. Native Messaging Host Registration ---
-Write-Step "Registering Native Messaging Host & MCP Configurations..."
+Write-Step "[4/4] Registering Native Messaging Host & MCP Configurations..."
 node setup-host.mjs
 
 # Verify Windows Registry Key
@@ -146,9 +154,9 @@ if (-not $SkipTests) {
     Write-Step "Running automated self-tests..."
     try {
         if ($hasUv) {
-            uv run pytest tests/ -q
+            uv run pytest tests/ -v
         } elseif (Test-Path $venvPython) {
-            & $venvPython -m pytest tests/ -q
+            & $venvPython -m pytest tests/ -v
         }
         Write-Success "All unit and integration tests passed successfully!"
     } catch {
@@ -160,9 +168,9 @@ if (-not $SkipTests) {
 $extensionPath = Join-Path $ScriptDir "extension"
 Write-Host @"
 
-======================================================
-  🎉 Chrome Bridge is Ready!
-======================================================"
+================================================================
+   🎉 Chrome Bridge is Live & Ready on Windows!
+================================================================
 
 Next Steps:
   1. Open Google Chrome and navigate to: chrome://extensions/
@@ -172,3 +180,4 @@ Next Steps:
   4. Ensure the extension is enabled and active!
 
 "@ -ForegroundColor Green
+
