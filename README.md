@@ -71,7 +71,7 @@ Choose your operating system:
 2. Turn on the **Developer mode** toggle in the top-right corner.
 3. Click **Load unpacked** (top-left).
 4. Select the `extension` folder inside this repository (`chrome-bridge/extension`).
-5. You will see the **Antigravity Bridge** icon in your toolbar showing **`🟢 Connected`**.
+5. You will see the **Chrome Bridge** icon in your toolbar showing **`🟢 Connected`**.
 
 ---
 

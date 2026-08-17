@@ -1,5 +1,5 @@
 /**
- * In-Page DOM Automation Engine for Antigravity Chrome Bridge
+ * In-Page DOM Automation Engine for Chrome Bridge
  * 
  * Provides isolated DOM traversal, Semantic DOM Snapshot generation,
  * Element Ref-ID indexing, fuzzy locator matching, and hit-testing verification.

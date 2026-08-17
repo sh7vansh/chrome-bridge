@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Antigravity Chrome Bridge",
+  "name": "Chrome Bridge",
   "version": "1.0.0",
-  "description": "Native Messaging Bridge connecting Google Chrome to Antigravity and AI coding assistants.",
+  "description": "Native Messaging Bridge connecting Google Chrome to AI coding assistants and Python runtime.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1oPeG09jnM9Rg5UotLIUDdTNO/muCCqNbKRfETRqfJaAXbtnPeRCNfZH5rUW98q0CN8RWM8unITa1x/Pq1dFRUx9hd8a2qRQs1gdYtxOiludrndg0lLvUO9HANr25Yyb2m4wMHq+A2yjs9rNG6Pl/6+Xed9J/Os0lw6Qo56TJSE39VMHhX0ZYJkaIB0Q7rGwl9EvxvZRh8mhNQqNxB/onW7/HYUmMPQhTDNIaSqtcLCmn7G/reN+iuWqX/wMohC8W7+dOZiRvcq90o6FEKDB3Ac/V5whHVC1QPLT6OcgbPdN3k4jUrOur2WAiVoChNhSSOa7/W+J70X4tnmqGI/ZqQIDAQAB",
   "permissions": [
     "nativeMessaging",
@@ -22,7 +22,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Antigravity Bridge",
+    "default_title": "Chrome Bridge",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Antigravity Chrome Bridge - Windows Setup & Diagnostics Script
+    Chrome Bridge - Windows Setup & Diagnostics Script
 .DESCRIPTION
     Automates dependency checks (Node.js, Python/uv), virtual environment setup,
     Chrome Native Messaging Host registration, MCP configuration, and self-testing.
@@ -46,8 +46,8 @@ function Write-Err {
 
 Write-Host @"
 ======================================================
-  🚀 Antigravity Chrome Bridge - Windows Setup v2.0   
-======================================================
+  🚀 Chrome Bridge - Windows Setup v2.0   
+======================================================"
 "@ -ForegroundColor Magenta
 
 # --- 1. Validate Node.js ---
@@ -134,7 +134,7 @@ Write-Step "Registering Native Messaging Host & MCP Configurations..."
 node setup-host.mjs
 
 # Verify Windows Registry Key
-$regPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.antigravity.chrome_bridge"
+$regPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.chrome_bridge.native"
 if (Test-Path $regPath) {
     Write-Success "Verified Chrome Native Messaging Host in Windows Registry."
 } else {
@@ -161,8 +161,8 @@ $extensionPath = Join-Path $ScriptDir "extension"
 Write-Host @"
 
 ======================================================
-  🎉 Antigravity Chrome Bridge is Ready!
-======================================================
+  🎉 Chrome Bridge is Ready!
+======================================================"
 
 Next Steps:
   1. Open Google Chrome and navigate to: chrome://extensions/

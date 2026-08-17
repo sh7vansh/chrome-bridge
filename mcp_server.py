@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Antigravity Chrome Bridge - Python MCP Server
+"""Chrome Bridge - Python MCP Server
 
 Persistent Python REPL Runtime for AI Browser Automation.
 """

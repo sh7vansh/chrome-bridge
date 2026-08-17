@@ -1,6 +1,6 @@
 import { inPageDOMOperation } from './dom-engine.js';
 
-const HOST_NAME = 'com.antigravity.chrome_bridge';
+const HOST_NAME = 'com.chrome_bridge.native';
 let nativePort = null;
 let reconnectTimer = null;
 
@@ -425,7 +425,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isConnected,
         activityLogs,
         activeTab: activeTabInfo,
-        transport: 'Native Messaging (com.antigravity.chrome_bridge)',
+        transport: 'Native Messaging (com.chrome_bridge.native)',
         hostName: HOST_NAME
       });
     })();

@@ -29,8 +29,8 @@ DEFAULT_BROWSER_UNAVAILABLE_MSG = (
     "Browser instance is not reachable or session disconnected.\n\n"
     "Troubleshooting checklist:\n"
     "  1. Ensure Google Chrome is open and running.\n"
-    "  2. Verify Antigravity Chrome Bridge is active in Chrome.\n"
-    "  3. Re-run setup on this machine: npx antigravity-chrome-bridge setup"
+    "  2. Verify Chrome Bridge is active in Chrome.\n"
+    "  3. Re-run setup on this machine: node setup-host.mjs or ./setup.sh"
 )
 
 

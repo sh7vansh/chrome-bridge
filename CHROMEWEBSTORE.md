@@ -1,19 +1,19 @@
-# Chrome Web Store Listing — Antigravity Chrome Bridge
+# Chrome Web Store Listing — Chrome Bridge
 
-> Last Updated: 2026-08-16
+> Last Updated: 2026-08-18
 
 ---
 
 ## 📝 Store Listing Details
 
 **Extension Name**
-Antigravity Chrome Bridge
+Chrome Bridge
 
 **Short Description (Max 132 chars)**
-Connects your standard Google Chrome browser to Antigravity and AI coding assistants via Model Context Protocol (MCP).
+Connects your standard Google Chrome browser to AI coding assistants and Python runtime via Model Context Protocol (MCP).
 
 **Detailed Description**
-Antigravity Chrome Bridge seamlessly connects your active Google Chrome browser to local AI coding assistants and agents (such as Antigravity, Claude Desktop, and Cursor) using the open Model Context Protocol (MCP).
+Chrome Bridge seamlessly connects your active Google Chrome browser to local AI coding assistants and agents (such as Claude Desktop, Cursor, and Antigravity) using the open Model Context Protocol (MCP).
 
 Key Capabilities:
 - Seamless Navigation: Automates navigation across web pages and tabs without opening isolated/debug browsers.

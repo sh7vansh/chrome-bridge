@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Welcome to **Antigravity Chrome Bridge** — a stateful, in-memory bridge between AI agents and a live Google Chrome browser via a Python REPL runtime.
+Welcome to **Chrome Bridge** — a stateful, in-memory bridge between AI agents and a live Google Chrome browser via a Python REPL runtime.
 
 ## Core Rules & Intent Routing
 

@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOST_NAME = 'com.antigravity.chrome_bridge';
+const HOST_NAME = 'com.chrome_bridge.native';
 const EXTENSION_ID = 'nbghhppoiigjbdjbhefiaijofpnhgepb';
 const isWindows = platform() === 'win32';
 
-console.log('🚀 Setting up Antigravity Chrome Bridge across platforms...\n');
+console.log('🚀 Setting up Chrome Bridge across platforms...\n');
 
 // 1. Resolve / Bootstrap Python Environment
 function resolvePython() {
@@ -97,7 +97,7 @@ if (isWindows) {
 
 const manifest = {
   name: HOST_NAME,
-  description: 'Antigravity Chrome Bridge Native Host',
+  description: 'Chrome Bridge Native Host',
   path: hostExecutablePath,
   type: 'stdio',
   allowed_origins: [
@@ -223,4 +223,4 @@ if (existsSync(dirname(cursorPath))) {
   updateMcpConfig(cursorPath, 'Cursor');
 }
 
-console.log('\n🎉 Setup complete! Antigravity Chrome Bridge is ready for your AI assistants.');
+console.log('\n🎉 Setup complete! Chrome Bridge is ready for your AI assistants.');
