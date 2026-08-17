@@ -15,3 +15,9 @@ skills-lock.json
 com.antigravity.chrome_bridge.json
 com.chrome_bridge.native.json
 native-host.bat
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+.cache/

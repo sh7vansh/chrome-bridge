@@ -82,7 +82,7 @@ function crc32(buf) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-const dir = join(__dirname, 'extension', 'icons');
+const dir = join(__dirname, '..', 'extension', 'icons');
 for (const size of [16, 48, 128]) {
   const png = createPng(size, size);
   writeFileSync(join(dir, `icon-${size}.png`), png);
