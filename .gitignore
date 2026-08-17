@@ -10,3 +10,5 @@ server.log
 __pycache__/
 *.pyc
 .pytest_cache/
+.scratch/
+skills-lock.json
