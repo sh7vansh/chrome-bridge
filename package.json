@@ -8,9 +8,10 @@
     "chrome-bridge-mcp": "./mcp-server.mjs"
   },
   "scripts": {
-    "test": "node test-full.mjs",
+    "test": ".venv/bin/pytest -v",
+    "test:all": "./test.sh",
     "setup": "node setup-host.mjs",
-    "mcp": "node mcp-server.mjs",
+    "mcp": ".venv/bin/python mcp_server.py",
     "cli": "node ctl.mjs",
     "bridge": "node bridge.mjs"
   },
