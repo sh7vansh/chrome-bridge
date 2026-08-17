@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, cpSync, chmodSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -11,11 +11,114 @@ const HOST_NAME = 'com.chrome_bridge.native';
 const EXTENSION_ID = 'nbghhppoiigjbdjbhefiaijofpnhgepb';
 const isWindows = platform() === 'win32';
 
-console.log('🚀 Setting up Chrome Bridge across platforms...\n');
+// Parse command line arguments
+const args = process.argv.slice(2);
+const command = args[0] || 'setup';
 
-// 1. Resolve / Bootstrap Python Environment
+if (command === 'help' || command === '--help' || command === '-h') {
+  console.log(`
+Chrome Bridge CLI & Setup Tool
+
+Usage:
+  npx antigravity-chrome-bridge [command] [options]
+  node setup-host.mjs [command] [options]
+
+Commands:
+  setup (default)    Install runtime, register Chrome native host, install skill, & configure MCP
+  status             Check status of native messaging host, MCP config, and Python environment
+  help               Show this help message
+
+Options:
+  --dev, --local     Configure host pointing directly to current directory instead of ~/.chrome-bridge
+  --target <dir>     Specify custom target directory for runtime installation
+`);
+  process.exit(0);
+}
+
+// Determine installation directory
+const isDevFlag = args.includes('--dev') || args.includes('--local');
+const isNpxOrGlobal = __dirname.includes('node_modules') || __dirname.includes('_npx') || process.env.npm_config_global === 'true';
+const targetDirIndex = args.indexOf('--target');
+let customTarget = targetDirIndex !== -1 && args[targetDirIndex + 1] ? resolve(args[targetDirIndex + 1]) : null;
+
+let INSTALL_DIR = customTarget;
+if (!INSTALL_DIR) {
+  if (isDevFlag) {
+    INSTALL_DIR = __dirname;
+  } else if (isNpxOrGlobal || !existsSync(join(__dirname, '.git'))) {
+    INSTALL_DIR = join(homedir(), '.chrome-bridge');
+  } else {
+    // Local git clone default
+    INSTALL_DIR = __dirname;
+  }
+}
+
+if (command === 'status') {
+  console.log('🔍 Checking Chrome Bridge Status...\n');
+  console.log(`- Runtime Directory: ${INSTALL_DIR} (${existsSync(INSTALL_DIR) ? '✅ Exists' : '❌ Missing'})`);
+  
+  const venvDir = join(INSTALL_DIR, '.venv');
+  const venvPy = isWindows ? join(venvDir, 'Scripts', 'python.exe') : join(venvDir, 'bin', 'python3');
+  console.log(`- Python Environment: ${venvPy} (${existsSync(venvPy) ? '✅ Ready' : '⚠️ Missing/Unprovisioned'})`);
+
+  const hostScript = join(INSTALL_DIR, 'native-host.mjs');
+  console.log(`- Native Host Script: ${hostScript} (${existsSync(hostScript) ? '✅ Present' : '❌ Missing'})`);
+
+  const agentSkill = join(homedir(), '.agent', 'skills', 'chrome-bridge', 'SKILL.md');
+  console.log(`- Agent Skill: ${agentSkill} (${existsSync(agentSkill) ? '✅ Installed' : '⚠️ Missing'})`);
+
+  process.exit(0);
+}
+
+console.log('🚀 Setting up Chrome Bridge across platforms...');
+console.log(`📁 Target runtime location: ${INSTALL_DIR}\n`);
+
+// 1. Sync runtime files if installing to an external/persistent directory
+if (INSTALL_DIR !== __dirname) {
+  mkdirSync(INSTALL_DIR, { recursive: true });
+  
+  const runtimeFiles = [
+    'native-host.mjs',
+    'mcp_server.py',
+    'repl_engine.py',
+    'chrome_sdk.py',
+    'requirements.txt',
+    'package.json',
+    'pyproject.toml'
+  ];
+
+  for (const file of runtimeFiles) {
+    const src = join(__dirname, file);
+    const dst = join(INSTALL_DIR, file);
+    if (existsSync(src)) {
+      copyFileSync(src, dst);
+    }
+  }
+
+  // Copy .agents and extension folders if present
+  const dirsToCopy = ['.agents', 'extension'];
+  for (const dir of dirsToCopy) {
+    const srcDir = join(__dirname, dir);
+    const dstDir = join(INSTALL_DIR, dir);
+    if (existsSync(srcDir)) {
+      cpSync(srcDir, dstDir, { recursive: true });
+    }
+  }
+
+  console.log(`✅ Synced runtime files to: ${INSTALL_DIR}`);
+}
+
+// Ensure native-host.mjs is executable on POSIX systems
+const targetNativeHostScript = join(INSTALL_DIR, 'native-host.mjs');
+if (!isWindows && existsSync(targetNativeHostScript)) {
+  try {
+    chmodSync(targetNativeHostScript, 0o755);
+  } catch {}
+}
+
+// 2. Resolve / Bootstrap Python Environment
 function resolvePython() {
-  const venvDir = join(__dirname, '.venv');
+  const venvDir = join(INSTALL_DIR, '.venv');
   const venvPythonPosix = join(venvDir, 'bin', 'python3');
   const venvPythonWin = join(venvDir, 'Scripts', 'python.exe');
 
@@ -35,14 +138,15 @@ function resolvePython() {
       hasUv = true;
     } catch {}
 
+    const reqPath = join(INSTALL_DIR, 'requirements.txt');
     if (hasUv) {
-      execSync('uv venv .venv', { cwd: __dirname, stdio: 'inherit' });
-      execSync('uv pip install -r requirements.txt', { cwd: __dirname, stdio: 'inherit' });
+      execSync(`uv venv "${venvDir}"`, { cwd: INSTALL_DIR, stdio: 'inherit' });
+      execSync(`uv pip install -r "${reqPath}"`, { cwd: INSTALL_DIR, stdio: 'inherit' });
     } else {
       const pythonCmd = isWindows ? 'python' : 'python3';
-      execSync(`${pythonCmd} -m venv .venv`, { cwd: __dirname, stdio: 'inherit' });
+      execSync(`${pythonCmd} -m venv "${venvDir}"`, { cwd: INSTALL_DIR, stdio: 'inherit' });
       const pipCmd = isWindows ? join(venvDir, 'Scripts', 'pip.exe') : join(venvDir, 'bin', 'pip');
-      execSync(`"${pipCmd}" install -r requirements.txt`, { cwd: __dirname, stdio: 'inherit' });
+      execSync(`"${pipCmd}" install -r "${reqPath}"`, { cwd: INSTALL_DIR, stdio: 'inherit' });
     }
 
     if (isWindows && existsSync(venvPythonWin)) return venvPythonWin;
@@ -76,15 +180,15 @@ function resolvePython() {
 }
 
 const PYTHON_CMD = resolvePython();
-const HOST_SCRIPT = join(__dirname, 'native-host.mjs');
-const MCP_PYTHON_SCRIPT = join(__dirname, 'mcp_server.py');
+const HOST_SCRIPT = join(INSTALL_DIR, 'native-host.mjs');
+const MCP_PYTHON_SCRIPT = join(INSTALL_DIR, 'mcp_server.py');
 
-// 2. Register Native Messaging Host
+// 3. Register Native Messaging Host
 let hostExecutablePath = HOST_SCRIPT;
 
 if (isWindows) {
   // On Windows, Chrome requires an executable (.bat or .exe)
-  const batPath = join(__dirname, 'native-host.bat');
+  const batPath = join(INSTALL_DIR, 'native-host.bat');
   const batContent = `@echo off\r\nnode "${HOST_SCRIPT}" %*\r\n`;
   try {
     writeFileSync(batPath, batContent);
@@ -107,7 +211,7 @@ const manifest = {
 
 if (isWindows) {
   // Windows Registration via Registry Keys
-  const manifestDir = join(__dirname);
+  const manifestDir = join(INSTALL_DIR);
   const manifestPath = join(manifestDir, `${HOST_NAME}.json`);
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(`✅ Wrote Windows Host Manifest: ${manifestPath}`);
@@ -152,8 +256,8 @@ if (isWindows) {
   }
 }
 
-// 3. Install Agent Skill into ~/.agent/skills and ~/.gemini/...
-const skillSource = join(__dirname, '.agents', 'skills', 'chrome-bridge', 'SKILL.md');
+// 4. Install Agent Skill into ~/.agent/skills and ~/.gemini/...
+const skillSource = join(INSTALL_DIR, '.agents', 'skills', 'chrome-bridge', 'SKILL.md');
 
 if (existsSync(skillSource)) {
   const destDirs = [
@@ -169,7 +273,7 @@ if (existsSync(skillSource)) {
   }
 }
 
-// 4. Automatically update MCP configurations across clients
+// 5. Automatically update MCP configurations across clients
 function updateMcpConfig(filePath, clientName) {
   try {
     let config = { mcpServers: {} };
@@ -224,3 +328,4 @@ if (existsSync(dirname(cursorPath))) {
 }
 
 console.log('\n🎉 Setup complete! Chrome Bridge is ready for your AI assistants.');
+

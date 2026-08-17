@@ -4,8 +4,8 @@
   "description": "Chrome Bridge 2.0 - Persistent Python REPL Runtime & Chrome Extension for AI browser automation",
   "type": "module",
   "bin": {
-    "antigravity-chrome-bridge": "./setup-host.mjs",
-    "chrome-bridge": "./setup-host.mjs"
+    "antigravity-chrome-bridge": "setup-host.mjs",
+    "chrome-bridge": "setup-host.mjs"
   },
   "scripts": {
     "test": ".venv/bin/pytest -v",
@@ -13,6 +13,18 @@
     "setup": "node setup-host.mjs",
     "mcp": ".venv/bin/python mcp_server.py"
   },
+  "files": [
+    "native-host.mjs",
+    "mcp_server.py",
+    "repl_engine.py",
+    "chrome_sdk.py",
+    "setup-host.mjs",
+    "requirements.txt",
+    "pyproject.toml",
+    ".agents/",
+    "extension/",
+    "README.md"
+  ],
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -21,6 +33,17 @@
     "python-repl",
     "antigravity"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sh7vansh/chrome-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sh7vansh/chrome-bridge/issues"
+  },
+  "homepage": "https://github.com/sh7vansh/chrome-bridge#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "",
   "license": "MIT"
 }
