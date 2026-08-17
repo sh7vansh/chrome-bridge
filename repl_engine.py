@@ -9,6 +9,8 @@ import sys
 import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from chrome_sdk import ChromeBridgeError
+
 
 class OutputBudgetFormatter:
     """Serializes and caps Python REPL execution results to fit token budgets."""
@@ -232,7 +234,7 @@ class PythonReplSession:
             # Check for auto-snapshot attribute on exception or session
             if hasattr(e, "auto_snapshot") and getattr(e, "auto_snapshot"):
                 auto_snapshot = getattr(e, "auto_snapshot")
-            elif "chrome" in self._globals and hasattr(self._globals["chrome"], "snapshot"):
+            elif isinstance(e, ChromeBridgeError) and "chrome" in self._globals and hasattr(self._globals["chrome"], "snapshot"):
                 try:
                     auto_snapshot = self._globals["chrome"].snapshot()
                 except Exception:
@@ -263,7 +265,7 @@ class PythonReplSession:
                 clean_frames.append(frame)
             elif "chrome_sdk.py" in fn:
                 # Include high-level public methods, exclude socket client / IPC internals
-                if frame.name not in ("call", "connect", "_raise_structured_error", "close"):
+                if not frame.name.startswith("_") and frame.name not in ("call", "connect", "close", "ping"):
                     clean_frames.append(frame)
             elif not fn.startswith("<") and "site-packages" not in fn and "lib/python" not in fn:
                 clean_frames.append(frame)

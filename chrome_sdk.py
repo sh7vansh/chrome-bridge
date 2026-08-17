@@ -228,34 +228,47 @@ class ChromeSocketClient:
             if isinstance(e, ChromeBridgeError):
                 raise
             self.close()
-            raise BrowserUnavailableError(f"Browser communication error during '{action}': {str(e)}") from e
+            raise BrowserUnavailableError(f"Browser communication error during '{action}'.") from e
 
     def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
         err_data = resp.get("error")
+        auto_snapshot = resp.get("auto_snapshot")
+        if isinstance(err_data, dict) and not auto_snapshot:
+            auto_snapshot = err_data.get("auto_snapshot")
+
         target_loc = params.get("target") if params else None
-        target_str = str(target_loc)
+        target_str = ""
+        if isinstance(target_loc, dict):
+            if target_loc.get("type") == "ref":
+                target_str = f"[#{target_loc.get('refId')}]"
+            else:
+                target_str = str(target_loc.get("selector", ""))
+        elif target_loc is not None:
+            target_str = str(target_loc)
+
         tab_id = params.get("tabId") if params else None
 
+        exc = None
         if isinstance(err_data, dict):
             code = err_data.get("code") or err_data.get("name")
             if code == "ELEMENT_NOT_FOUND" or "not found" in str(err_data.get("message", "")).lower():
-                raise ElementNotFoundError(
+                exc = ElementNotFoundError(
                     target=err_data.get("target", target_str),
                     tab_id=err_data.get("tabId", tab_id),
                     stale=err_data.get("stale", False),
                     suggestions=err_data.get("suggestions", []),
                     url=err_data.get("url", ""),
                 )
-            if code == "ACTION_INTERCEPTED":
-                raise ActionInterceptionError(
+            elif code == "ACTION_INTERCEPTED":
+                exc = ActionInterceptionError(
                     target=err_data.get("target", target_str),
                     interceptor_tag=err_data.get("interceptorTag", "overlay"),
                     interceptor_ref=err_data.get("interceptorRef"),
                     interceptor_desc=err_data.get("interceptorDesc", ""),
                     tab_id=err_data.get("tabId", tab_id),
                 )
-            if code == "TIMEOUT":
-                raise NavigationTimeoutError(
+            elif code == "TIMEOUT":
+                exc = NavigationTimeoutError(
                     target=err_data.get("target", target_str),
                     timeout=err_data.get("timeout", 10.0),
                     url=err_data.get("url", ""),
@@ -263,17 +276,23 @@ class ChromeSocketClient:
                     dom_state=err_data.get("domState", "unknown"),
                     tab_id=err_data.get("tabId", tab_id),
                 )
-            raise ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
+            else:
+                exc = ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
+        else:
+            err_str = str(err_data)
+            if "not found" in err_str.lower():
+                exc = ElementNotFoundError(target=target_str, tab_id=tab_id)
+            elif "intercepted" in err_str.lower():
+                exc = ActionInterceptionError(target=target_str, tab_id=tab_id)
+            elif "timed out" in err_str.lower():
+                exc = NavigationTimeoutError(target=target_str, tab_id=tab_id)
+            else:
+                exc = ChromeBridgeError(err_str, tab_id=tab_id)
 
-        err_str = str(err_data)
-        if "not found" in err_str.lower():
-            raise ElementNotFoundError(target=target_str, tab_id=tab_id)
-        if "intercepted" in err_str.lower():
-            raise ActionInterceptionError(target=target_str, tab_id=tab_id)
-        if "timed out" in err_str.lower():
-            raise NavigationTimeoutError(target=target_str, tab_id=tab_id)
-
-        raise ChromeBridgeError(err_str, tab_id=tab_id)
+        if auto_snapshot and exc:
+            exc.auto_snapshot = auto_snapshot
+        if exc:
+            raise exc
 
 
 class Tab:
