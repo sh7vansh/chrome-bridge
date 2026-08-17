@@ -12,3 +12,5 @@ __pycache__/
 .pytest_cache/
 .scratch/
 skills-lock.json
+com.antigravity.chrome_bridge.json
+native-host.bat

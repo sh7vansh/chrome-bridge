@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import net from 'node:net';
-import { unlinkSync, existsSync } from 'node:fs';
+import { unlinkSync, existsSync, writeFileSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
-import { tmpdir } from 'node:os';
+import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 
+const isWindows = platform() === 'win32';
 const SOCKET_PATH = join(tmpdir(), 'antigravity_chrome_bridge.sock');
+const PORT_FILE = join(tmpdir(), 'antigravity_chrome_bridge.port');
 
 // Map of pending MCP client requests: id -> net.Socket
 const pendingRequests = new Map();
@@ -61,10 +63,18 @@ process.stdin.on('end', () => {
 });
 
 // 2. Local IPC Server for MCP Clients
-if (existsSync(SOCKET_PATH)) {
-  try {
-    unlinkSync(SOCKET_PATH);
-  } catch {}
+if (isWindows) {
+  if (existsSync(PORT_FILE)) {
+    try {
+      unlinkSync(PORT_FILE);
+    } catch {}
+  }
+} else {
+  if (existsSync(SOCKET_PATH)) {
+    try {
+      unlinkSync(SOCKET_PATH);
+    } catch {}
+  }
 }
 
 const server = net.createServer((clientSocket) => {
@@ -92,14 +102,26 @@ const server = net.createServer((clientSocket) => {
   clientSocket.on('error', () => {});
 });
 
-server.listen(SOCKET_PATH, () => {
-  // Signal ready to Chrome
-  sendNativeMessage({ event: 'host_ready', socketPath: SOCKET_PATH });
-});
+if (isWindows) {
+  server.listen(0, '127.0.0.1', () => {
+    const addr = server.address();
+    writeFileSync(PORT_FILE, String(addr.port), 'utf8');
+    sendNativeMessage({ event: 'host_ready', port: addr.port });
+  });
+} else {
+  server.listen(SOCKET_PATH, () => {
+    // Signal ready to Chrome
+    sendNativeMessage({ event: 'host_ready', socketPath: SOCKET_PATH });
+  });
+}
 
 function cleanup() {
   try {
-    if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
+    if (isWindows) {
+      if (existsSync(PORT_FILE)) unlinkSync(PORT_FILE);
+    } else {
+      if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
+    }
   } catch {}
   process.exit(0);
 }

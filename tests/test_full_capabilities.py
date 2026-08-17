@@ -12,28 +12,43 @@ from mcp_server import execute_python, _SESSION
 
 
 class MockSocketBridge:
-    """Mock Unix Domain Socket server simulating Chrome Extension native host bridge."""
+    """Mock Unix Domain Socket / TCP loopback server simulating Chrome Extension native host bridge."""
 
-    def __init__(self, socket_path="/tmp/test_chrome_bridge.sock"):
+    def __init__(self, socket_path="/tmp/test_chrome_bridge.sock", port_file=None):
         self.socket_path = socket_path
+        self.port_file = port_file or (os.path.splitext(socket_path)[0] + ".port")
         self._server = None
         self._thread = None
         self._running = False
         self.recorded_requests = []
         self.responses = {}
+        self.use_tcp = os.name == "nt" or not hasattr(socket, "AF_UNIX")
 
     def start(self):
-        if os.path.exists(self.socket_path):
-            try:
-                os.unlink(self.socket_path)
-            except Exception:
-                pass
+        if self.use_tcp:
+            if os.path.exists(self.port_file):
+                try:
+                    os.unlink(self.port_file)
+                except Exception:
+                    pass
+            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._server.bind(("127.0.0.1", 0))
+            port = self._server.getsockname()[1]
+            with open(self.port_file, "w", encoding="utf-8") as f:
+                f.write(str(port))
+            self._server.listen(5)
+        else:
+            if os.path.exists(self.socket_path):
+                try:
+                    os.unlink(self.socket_path)
+                except Exception:
+                    pass
 
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(self.socket_path)
-        self._server.listen(5)
+            self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self._server.bind(self.socket_path)
+            self._server.listen(5)
+
         self._running = True
-
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -87,16 +102,24 @@ class MockSocketBridge:
                 self._server.close()
             except Exception:
                 pass
-        if os.path.exists(self.socket_path):
-            try:
-                os.unlink(self.socket_path)
-            except Exception:
-                pass
+        if self.use_tcp:
+            if os.path.exists(self.port_file):
+                try:
+                    os.unlink(self.port_file)
+                except Exception:
+                    pass
+        else:
+            if os.path.exists(self.socket_path):
+                try:
+                    os.unlink(self.socket_path)
+                except Exception:
+                    pass
 
 
 @pytest.fixture
 def mock_bridge():
-    sock_path = "/tmp/test_chrome_bridge.sock"
+    import tempfile
+    sock_path = os.path.join(tempfile.gettempdir(), "test_chrome_bridge.sock")
     bridge = MockSocketBridge(sock_path)
 
     # Configure default responses

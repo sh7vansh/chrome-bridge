@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional, Union
 import tempfile
 
 DEFAULT_SOCKET_PATH = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
+DEFAULT_PORT_FILE = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
 SOCKET_PATH = DEFAULT_SOCKET_PATH
+PORT_FILE = DEFAULT_PORT_FILE
 TargetLocator = Union[int, str]
 
 
@@ -164,10 +166,16 @@ def normalize_locator(target: TargetLocator) -> Dict[str, Any]:
 
 
 class ChromeSocketClient:
-    """Synchronous Unix Domain Socket client for Chrome Bridge native host."""
+    """Synchronous IPC client for Chrome Bridge native host."""
 
-    def __init__(self, socket_path: str = SOCKET_PATH):
+    def __init__(self, socket_path: str = SOCKET_PATH, port_file: Optional[str] = None):
         self.socket_path = socket_path
+        if port_file is not None:
+            self.port_file = port_file
+        elif socket_path != DEFAULT_SOCKET_PATH:
+            self.port_file = os.path.splitext(socket_path)[0] + ".port"
+        else:
+            self.port_file = DEFAULT_PORT_FILE
         self._sock: Optional[socket.socket] = None
         self._req_id = 0
         self._buffer = b""
@@ -176,14 +184,27 @@ class ChromeSocketClient:
         if self._sock:
             return
 
+        use_tcp = os.name == "nt" or not hasattr(socket, "AF_UNIX")
+
         for i in range(retries):
             try:
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                s.connect(self.socket_path)
+                if use_tcp:
+                    if not os.path.exists(self.port_file):
+                        raise FileNotFoundError(f"Port file '{self.port_file}' does not exist.")
+                    with open(self.port_file, "r", encoding="utf-8") as f:
+                        port_str = f.read().strip()
+                    if not port_str:
+                        raise ValueError("Port file is empty.")
+                    port = int(port_str)
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect(("127.0.0.1", port))
+                else:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.connect(self.socket_path)
                 s.settimeout(20.0)
                 self._sock = s
                 return
-            except (socket.error, FileNotFoundError) as err:
+            except (socket.error, FileNotFoundError, ValueError) as err:
                 if i == retries - 1:
                     raise BrowserUnavailableError() from err
                 time.sleep(backoff * (i + 1))
