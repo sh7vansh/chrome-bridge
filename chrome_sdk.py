@@ -7,7 +7,10 @@ import socket
 import time
 from typing import Any, Dict, List, Optional, Union
 
-SOCKET_PATH = "/tmp/chrome_bridge.sock"
+import tempfile
+
+DEFAULT_SOCKET_PATH = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
+SOCKET_PATH = DEFAULT_SOCKET_PATH
 TargetLocator = Union[int, str]
 
 
@@ -23,7 +26,11 @@ class ChromeBridgeError(Exception):
 class BrowserUnavailableError(ChromeBridgeError):
     """Raised when the browser is not running, unreachable, or disconnected."""
 
-    def __init__(self, message: str = "Browser instance is not reachable or session disconnected.", tab_id: Optional[int] = None):
+    def __init__(
+        self,
+        message: str = "Browser instance is not reachable or session disconnected. Please ensure Chrome is running and Chrome Bridge is active.",
+        tab_id: Optional[int] = None,
+    ):
         super().__init__(message, tab_id)
 
 
@@ -170,9 +177,7 @@ class ChromeSocketClient:
                 return
             except (socket.error, FileNotFoundError) as err:
                 if i == retries - 1:
-                    raise BrowserUnavailableError(
-                        "Browser instance is not reachable or session disconnected."
-                    ) from err
+                    raise BrowserUnavailableError() from err
                 time.sleep(backoff * (i + 1))
 
     def close(self) -> None:

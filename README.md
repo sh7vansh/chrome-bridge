@@ -1,4 +1,8 @@
-# Chrome Bridge 2.0 (Persistent Python REPL Runtime)
+# Antigravity Chrome Bridge 2.0 (Persistent Python REPL Runtime)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Cross-Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen)](README.md)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](pyproject.toml)
 
 A high-performance Model Context Protocol (MCP) server and Chrome Extension providing a **stateful, persistent in-memory Python REPL runtime** to control and inspect your active Google Chrome browser in real-time.
 
@@ -9,43 +13,61 @@ Instead of orchestrating dozens of discrete tools across multiple latency-heavy 
 ## 🌟 Key Features
 
 - **Persistent Python REPL Session**: Variables, functions, imports, and dataframes defined in turn 1 persist seamlessly into subsequent turns.
+- **Cross-Platform Parity**: Full support for **macOS, Windows, and Linux** with automated Windows Registry configuration and platform-aware IPC.
 - **Token-Distilled Semantic DOM Snapshots**: In-page `TreeWalker` traversal with AccName 1.2 name computation and visibility filtering delivers **99%+ token reduction** over raw DOM trees.
 - **Lightweight Indexed Ref-IDs**: Actionable elements receive 1-based sequential Ref-IDs (`[#1]`, `[#2]`), eliminating brittle selectors and coordinate hallucination.
 - **Polymorphic Locator Dispatch**: SDK methods accept integer Ref-IDs (`14`), token strings (`"[#14]"` / `"#14"`), or standard CSS selectors (`"button.submit"`).
-- **Dual-Layer Token Budgeting**: Structural collection pruning (10 items, 10 keys, depth 3) + hard 12,000-character safety cap with head-and-tail preservation (`... [N chars / M tokens omitted] ...`).
 - **Single-Turn Self-Healing Diagnostics**:
   - Auto-injected `[diagnostic_auto_snapshot]` on unhandled browser exceptions.
   - Fuzzy near-match candidate suggestions for stale Ref-IDs (`Did you mean: [#18] (button 'Submit')?`).
   - Coordinate hit-testing with interceptor detection (modals, overlays, cookie banners).
-  - Synchronous waiting helpers with rich timeout state introspection (`readyState`, DOM visibility).
-- **Everyday Profile**: Works with your regular Chrome profile (passwords, logins, cookies intact) via Native Messaging without requiring debug flags.
+  - Actionable checklist prompts on browser disconnection.
+- **Works with Your Everyday Profile**: Connects to your active, logged-in browser session (passwords, logins, cookies intact) via native IPC with zero bot detection or port exposure.
 
 ---
 
-## 📦 Quick Start & Installation
+## 📦 Quick Start & Installation (60 Seconds)
 
 ### 1. Run Setup
+
+#### Option A: One-Command via npx
 ```bash
-git clone https://github.com/sh7vansh/chrome-bridge.git
-cd chrome-bridge
-./setup.sh
+npx antigravity-chrome-bridge setup
 ```
-> **What `./setup.sh` does:**
-> - Initializes Python virtualenv with `mcp>=1.0.0` and `pytest`.
-> - Registers the Native Messaging Host in Google Chrome, Chromium, and Brave.
-> - Auto-registers the MCP Server in `~/.agent/mcp_config.json` and Claude Desktop configs.
-> - Copies the agent skill to `~/.agent/skills/chrome-bridge/SKILL.md`.
+
+#### Option B: Clone & Run Script
+- **macOS / Linux:**
+  ```bash
+  git clone https://github.com/sh7vansh/chrome-bridge.git
+  cd chrome-bridge
+  ./setup.sh
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  git clone https://github.com/sh7vansh/chrome-bridge.git
+  cd chrome-bridge
+  .\setup.ps1
+  ```
+
+> **What the installer automates:**
+> - Probes Python 3.10+ and provisions `.venv` dependencies.
+> - Registers Native Messaging manifests (or Windows Registry `HKCU` keys on Windows).
+> - Auto-discovers and configures MCP in **Claude Desktop**, **Antigravity CLI**, and **Cursor**.
 
 ### 2. Load the Chrome Extension
-1. Open Google Chrome and go to `chrome://extensions`.
+
+1. Open Google Chrome (or Brave / Edge) and navigate to `chrome://extensions`.
 2. Enable **Developer mode** (toggle in top right).
 3. Click **Load unpacked** and select the `chrome-bridge/extension` directory.
 4. The extension icon will appear in your toolbar showing **`🟢 Native Bridge`**.
 
 ### 3. Verification
-Run the automated test suite anytime:
+
+Run the test suite anytime:
 ```bash
-.venv/bin/pytest
+.venv/bin/pytest tests/
+# or
+npm test
 ```
 
 ---

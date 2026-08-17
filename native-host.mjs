@@ -3,8 +3,10 @@
 import net from 'node:net';
 import { unlinkSync, existsSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const SOCKET_PATH = '/tmp/chrome_bridge.sock';
+const SOCKET_PATH = join(tmpdir(), 'antigravity_chrome_bridge.sock');
 
 // Map of pending MCP client requests: id -> net.Socket
 const pendingRequests = new Map();

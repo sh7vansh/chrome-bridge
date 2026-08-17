@@ -97,3 +97,11 @@ def test_socket_connection_failure_raises_browser_unavailable_error():
     for forbidden in ["extension", "socket", "/tmp/", "native-host", "manifest"]:
         assert forbidden not in err_str, f"Forbidden term '{forbidden}' leaked in error message: {err_str}"
 
+
+def test_default_socket_path_resolution():
+    import tempfile
+    import os
+    from chrome_sdk import DEFAULT_SOCKET_PATH
+    expected = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
+    assert DEFAULT_SOCKET_PATH == expected
+

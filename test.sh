@@ -16,13 +16,15 @@ echo -e "${BOLD}${CYAN}======================================================${N
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-# 1. Check Python Virtual Environment
+# 1. Check Python Virtual Environment / Test Runner
 if [ -f ".venv/bin/pytest" ]; then
     PYTEST_BIN=".venv/bin/pytest"
+elif command -v uv &> /dev/null; then
+    PYTEST_BIN="uv run pytest"
 elif command -v pytest &> /dev/null; then
     PYTEST_BIN="pytest"
 else
-    echo -e "${RED}[ERROR] pytest not found in .venv or PATH.${NC}"
+    echo -e "${RED}[ERROR] pytest or uv not found.${NC}"
     exit 1
 fi
 
@@ -35,8 +37,8 @@ FORBIDDEN_LEAK=( "socket.sock" "native-host.mjs" "Manifest V3 worker" )
 VIOLATIONS=0
 
 for term in "${FORBIDDEN_LEAK[@]}"; do
-    if grep -q "$term" skills/chrome-bridge/SKILL.md 2>/dev/null; then
-        echo -e "${RED}[FAIL] Forbidden leak '$term' found in skills/chrome-bridge/SKILL.md${NC}"
+    if grep -q "$term" .agents/skills/chrome-bridge/SKILL.md 2>/dev/null; then
+        echo -e "${RED}[FAIL] Forbidden leak '$term' found in .agents/skills/chrome-bridge/SKILL.md${NC}"
         VIOLATIONS=$((VIOLATIONS + 1))
     fi
 done
