@@ -389,8 +389,10 @@ const skillSource = join(INSTALL_DIR, '.agents', 'skills', 'chrome-bridge', 'SKI
 
 if (existsSync(skillSource)) {
   const destDirs = [
-    { target: 'Antigravity Global Agent', dir: join(homedir(), '.agent', 'skills', 'chrome-bridge') },
-    { target: 'Gemini CLI Agent', dir: join(homedir(), '.gemini', 'antigravity-cli', 'skills', 'chrome-bridge') }
+    { target: 'Antigravity Global Agent (.agents)', dir: join(homedir(), '.agents', 'skills', 'chrome-bridge') },
+    { target: 'Antigravity Global Agent (.agent)', dir: join(homedir(), '.agent', 'skills', 'chrome-bridge') },
+    { target: 'Gemini CLI Agent', dir: join(homedir(), '.gemini', 'antigravity-cli', 'skills', 'chrome-bridge') },
+    { target: 'Gemini Config Skills', dir: join(homedir(), '.gemini', 'config', 'skills', 'chrome-bridge') }
   ];
   for (const item of destDirs) {
     try {
