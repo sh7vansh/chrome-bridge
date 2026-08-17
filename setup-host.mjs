@@ -9,9 +9,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST_NAME = 'com.antigravity.chrome_bridge';
 const EXTENSION_ID = 'nbghhppoiigjbdjbhefiaijofpnhgepb';
 const HOST_SCRIPT = join(__dirname, 'native-host.mjs');
-const MCP_SCRIPT = join(__dirname, 'mcp-server.mjs');
+const MCP_PYTHON_SCRIPT = join(__dirname, 'mcp-server.py');
+const VENV_PYTHON = join(__dirname, '.venv', 'bin', 'python3');
+const PYTHON_CMD = existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3';
 
-console.log('🚀 Setting up Chrome Bridge, Native Host & AI Agent MCP...\n');
+console.log('🚀 Setting up Chrome Bridge 2.0, Native Host & Python REPL MCP...\n');
 
 // 1. Register Native Messaging Host
 const manifest = {
@@ -73,12 +75,12 @@ function updateMcpConfig(filePath) {
     }
 
     config.mcpServers['chrome-bridge'] = {
-      command: 'node',
-      args: [MCP_SCRIPT]
+      command: PYTHON_CMD,
+      args: [MCP_PYTHON_SCRIPT]
     };
 
     writeFileSync(filePath, JSON.stringify(config, null, 2) + '\n');
-    console.log(`✅ Auto-configured MCP Server: ${filePath}`);
+    console.log(`✅ Auto-configured MCP Server (${PYTHON_CMD}): ${filePath}`);
     return true;
   } catch (err) {
     console.warn(`⚠️ Could not update ${filePath}:`, err.message);
@@ -102,4 +104,4 @@ for (const p of claudePaths) {
   }
 }
 
-console.log('\n🎉 Setup complete! Chrome Bridge is fully configured for your AI assistants.');
+console.log('\n🎉 Setup complete! Chrome Bridge 2.0 is fully configured for your AI assistants.');

@@ -1,0 +1,538 @@
+"""Synchronous Python SDK and IPC Client for Chrome Bridge."""
+
+import json
+import os
+import re
+import socket
+import time
+from typing import Any, Dict, List, Optional, Union
+
+SOCKET_PATH = "/tmp/chrome_bridge.sock"
+TargetLocator = Union[int, str]
+
+
+class ChromeBridgeError(Exception):
+    """Base exception for all Chrome Bridge operations."""
+
+    def __init__(self, message: str, tab_id: Optional[int] = None):
+        super().__init__(message)
+        self.tab_id = tab_id
+        self.auto_snapshot: Optional[str] = None
+
+
+class ElementNotFoundError(ChromeBridgeError):
+    """Raised when a Ref-ID or CSS selector cannot be located."""
+
+    def __init__(
+        self,
+        target: str,
+        tab_id: Optional[int] = None,
+        stale: bool = False,
+        suggestions: Optional[List[Dict[str, Any]]] = None,
+        url: str = "",
+    ):
+        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
+        url_str = f" (URL: {url})" if url else ""
+        msg = f"Element matching '{target}' not found{tab_str}{url_str}."
+        if stale:
+            msg += " The DOM mutated since the last snapshot was generated."
+        if suggestions:
+            sug_list = []
+            for s in suggestions:
+                ref = s.get("ref", "")
+                if isinstance(ref, int) or (isinstance(ref, str) and not ref.startswith("[#") and not ref.startswith("#")):
+                    ref = f"#{ref}"
+                if isinstance(ref, str) and not ref.startswith("["):
+                    ref = f"[{ref}]"
+                role = s.get("role", "element")
+                name = s.get("name", "")
+                sug_list.append(f"{ref} ({role} '{name}')")
+            msg += f" Did you mean: {', '.join(sug_list)}?"
+
+        super().__init__(msg, tab_id)
+        self.target = target
+        self.stale = stale
+        self.suggestions = suggestions or []
+        self.url = url
+
+
+class ActionInterceptionError(ChromeBridgeError):
+    """Raised when coordinate hit-testing is intercepted by an overlapping element."""
+
+    def __init__(
+        self,
+        target: str,
+        interceptor_tag: str = "",
+        interceptor_ref: Optional[Union[str, int]] = None,
+        interceptor_desc: str = "",
+        tab_id: Optional[int] = None,
+    ):
+        ref_formatted = ""
+        if interceptor_ref is not None:
+            r_str = str(interceptor_ref).strip()
+            if not r_str.startswith("#") and not r_str.startswith("[#"):
+                r_str = f"#{r_str}"
+            if not r_str.startswith("["):
+                r_str = f"[{r_str}]"
+            ref_formatted = r_str
+
+        interceptor_label = (
+            f"{ref_formatted} ({interceptor_desc})"
+            if ref_formatted
+            else (f"<{interceptor_tag}> ({interceptor_desc})" if interceptor_desc else f"<{interceptor_tag}>")
+        )
+        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
+        msg = (
+            f"Click on target '{target}' was intercepted by overlapping element "
+            f"{interceptor_label}{tab_str}. Dismiss or close the overlay before interacting with the target."
+        )
+        super().__init__(msg, tab_id)
+        self.target = target
+        self.interceptor_tag = interceptor_tag
+        self.interceptor_ref = interceptor_ref
+
+
+class NavigationTimeoutError(ChromeBridgeError):
+    """Raised when navigation or element condition waiting exceeds deadline."""
+
+    def __init__(
+        self,
+        target: Optional[str] = None,
+        timeout: float = 10.0,
+        url: str = "",
+        ready_state: str = "unknown",
+        dom_state: str = "unknown",
+        tab_id: Optional[int] = None,
+    ):
+        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
+        msg = f"Timed out after {timeout:.1f}s waiting for '{target or url}'{tab_str}."
+        if url or ready_state or dom_state:
+            msg += f" (Current URL: {url}, readyState: '{ready_state}', DOM state: '{dom_state}')"
+        super().__init__(msg, tab_id)
+        self.timeout = timeout
+        self.url = url
+        self.ready_state = ready_state
+        self.dom_state = dom_state
+
+
+def normalize_locator(target: TargetLocator) -> Dict[str, Any]:
+    """Normalize integer, Ref-ID string, or CSS selector into an IPC target payload."""
+    if isinstance(target, int):
+        return {"type": "ref", "refId": target}
+
+    target_str = str(target).strip()
+
+    # Matches [#12] or [# 12]
+    m_bracket = re.match(r"^\[#\s*(\d+)\]$", target_str)
+    if m_bracket:
+        return {"type": "ref", "refId": int(m_bracket.group(1))}
+
+    # Matches #12 (pure number following #)
+    m_hash = re.match(r"^#(\d+)$", target_str)
+    if m_hash:
+        return {"type": "ref", "refId": int(m_hash.group(1))}
+
+    # Matches ref:12 or ref=12
+    m_ref = re.match(r"^ref[:=](\d+)$", target_str, re.IGNORECASE)
+    if m_ref:
+        return {"type": "ref", "refId": int(m_ref.group(1))}
+
+    # Standard CSS selector
+    return {"type": "css", "selector": target_str}
+
+
+class ChromeSocketClient:
+    """Synchronous Unix Domain Socket client for Chrome Bridge native host."""
+
+    def __init__(self, socket_path: str = SOCKET_PATH):
+        self.socket_path = socket_path
+        self._sock: Optional[socket.socket] = None
+        self._req_id = 0
+        self._buffer = b""
+
+    def connect(self, retries: int = 5, backoff: float = 0.2) -> None:
+        if self._sock:
+            return
+
+        for i in range(retries):
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.connect(self.socket_path)
+                s.settimeout(20.0)
+                self._sock = s
+                return
+            except (socket.error, FileNotFoundError) as err:
+                if i == retries - 1:
+                    raise ChromeBridgeError(
+                        f"Could not connect to Chrome Bridge at {self.socket_path}. "
+                        "Make sure Google Chrome is running and the Chrome Bridge extension is enabled."
+                    ) from err
+                time.sleep(backoff * (i + 1))
+
+    def close(self) -> None:
+        if self._sock:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+            self._buffer = b""
+
+    def call(self, action: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Any:
+        self.connect()
+        self._req_id += 1
+        req_id = self._req_id
+        req_payload = {
+            "id": req_id,
+            "action": action,
+            "params": params or {},
+        }
+        data = json.dumps(req_payload) + "\n"
+
+        try:
+            assert self._sock is not None
+            self._sock.settimeout(timeout)
+            self._sock.sendall(data.encode("utf-8"))
+
+            while True:
+                # Check buffer for a complete line
+                if b"\n" in self._buffer:
+                    line, self._buffer = self._buffer.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    resp = json.loads(line.decode("utf-8"))
+                    if resp.get("id") == req_id:
+                        if not resp.get("success", False):
+                            self._raise_structured_error(resp, params)
+                        return resp.get("result")
+
+                chunk = self._sock.recv(65536)
+                if not chunk:
+                    raise ChromeBridgeError("Native socket closed unexpectedly.")
+                self._buffer += chunk
+
+        except socket.timeout:
+            self.close()
+            raise NavigationTimeoutError(
+                target=str(params.get("target") if params else action),
+                timeout=timeout,
+                url=params.get("url", "") if params else "",
+            )
+        except Exception as e:
+            if isinstance(e, ChromeBridgeError):
+                raise
+            self.close()
+            raise ChromeBridgeError(f"IPC communication error during '{action}': {str(e)}") from e
+
+    def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
+        err_data = resp.get("error")
+        target_loc = params.get("target") if params else None
+        target_str = str(target_loc)
+        tab_id = params.get("tabId") if params else None
+
+        if isinstance(err_data, dict):
+            code = err_data.get("code") or err_data.get("name")
+            if code == "ELEMENT_NOT_FOUND" or "not found" in str(err_data.get("message", "")).lower():
+                raise ElementNotFoundError(
+                    target=err_data.get("target", target_str),
+                    tab_id=err_data.get("tabId", tab_id),
+                    stale=err_data.get("stale", False),
+                    suggestions=err_data.get("suggestions", []),
+                    url=err_data.get("url", ""),
+                )
+            if code == "ACTION_INTERCEPTED":
+                raise ActionInterceptionError(
+                    target=err_data.get("target", target_str),
+                    interceptor_tag=err_data.get("interceptorTag", "overlay"),
+                    interceptor_ref=err_data.get("interceptorRef"),
+                    interceptor_desc=err_data.get("interceptorDesc", ""),
+                    tab_id=err_data.get("tabId", tab_id),
+                )
+            if code == "TIMEOUT":
+                raise NavigationTimeoutError(
+                    target=err_data.get("target", target_str),
+                    timeout=err_data.get("timeout", 10.0),
+                    url=err_data.get("url", ""),
+                    ready_state=err_data.get("readyState", "unknown"),
+                    dom_state=err_data.get("domState", "unknown"),
+                    tab_id=err_data.get("tabId", tab_id),
+                )
+            raise ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
+
+        err_str = str(err_data)
+        if "not found" in err_str.lower():
+            raise ElementNotFoundError(target=target_str, tab_id=tab_id)
+        if "intercepted" in err_str.lower():
+            raise ActionInterceptionError(target=target_str, tab_id=tab_id)
+        if "timed out" in err_str.lower():
+            raise NavigationTimeoutError(target=target_str, tab_id=tab_id)
+
+        raise ChromeBridgeError(err_str, tab_id=tab_id)
+
+
+class Tab:
+    """Scoped browser tab handle."""
+
+    def __init__(
+        self,
+        tab_id: int,
+        client: ChromeSocketClient,
+        title: str = "",
+        url: str = "",
+        active: bool = False,
+    ):
+        self.id = tab_id
+        self._client = client
+        self.title = title
+        self.url = url
+        self.active = active
+
+    def __repr__(self) -> str:
+        return f'<Tab id={self.id} title="{self.title}" url="{self.url}" active={self.active}>'
+
+    @property
+    def info(self) -> Dict[str, Any]:
+        """Fetch live metadata (url, title, active status) for this tab."""
+        tabs = self._client.call("list_tabs")
+        for t in tabs:
+            if t.get("id") == self.id:
+                self.title = t.get("title", "")
+                self.url = t.get("url", "")
+                self.active = t.get("active", False)
+                return t
+        return {"id": self.id, "title": self.title, "url": self.url, "active": self.active}
+
+    def activate(self) -> Dict[str, Any]:
+        """Focus and switch to this tab."""
+        return self._client.call("switch_tab", {"tabId": self.id})
+
+    def close(self) -> Dict[str, Any]:
+        """Close this tab."""
+        return self._client.call("close_tab", {"tabId": self.id})
+
+    def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
+        """Navigate tab to a URL."""
+        res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
+        self.url = res.get("url", url)
+        return res
+
+    def reload(self, bypass_cache: bool = False) -> Dict[str, Any]:
+        """Reload the tab."""
+        return self._client.call("reload", {"tabId": self.id, "bypassCache": bypass_cache})
+
+    def back(self) -> Dict[str, Any]:
+        """Navigate back in history."""
+        return self._client.call("go_back", {"tabId": self.id})
+
+    def forward(self) -> Dict[str, Any]:
+        """Navigate forward in history."""
+        return self._client.call("go_forward", {"tabId": self.id})
+
+    def snapshot(self, compact: bool = True) -> str:
+        """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs."""
+        res = self._client.call("get_page_content", {"tabId": self.id, "compact": compact})
+        if isinstance(res, dict):
+            return res.get("snapshot", "")
+        return str(res)
+
+    def click(self, target: TargetLocator, button: str = "left", count: int = 1) -> Dict[str, Any]:
+        """Click an element by Ref-ID or CSS selector."""
+        loc = normalize_locator(target)
+        return self._client.call(
+            "click",
+            {"target": loc, "button": button, "count": count, "tabId": self.id},
+            timeout=15.0,
+        )
+
+    def type(
+        self,
+        target: TargetLocator,
+        text: str,
+        clear: bool = True,
+        press_enter: bool = False,
+    ) -> Dict[str, Any]:
+        """Type text into an input or contenteditable element."""
+        loc = normalize_locator(target)
+        return self._client.call(
+            "type",
+            {
+                "target": loc,
+                "text": text,
+                "clear": clear,
+                "pressEnter": press_enter,
+                "tabId": self.id,
+            },
+            timeout=15.0,
+        )
+
+    def press_key(self, key: str) -> Dict[str, Any]:
+        """Press a keyboard key."""
+        return self._client.call("press_key", {"key": key, "tabId": self.id})
+
+    def select(self, target: TargetLocator, value: str) -> Dict[str, Any]:
+        """Select an option in a dropdown."""
+        loc = normalize_locator(target)
+        return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id})
+
+    def hover(self, target: TargetLocator) -> Dict[str, Any]:
+        """Hover mouse over an element."""
+        loc = normalize_locator(target)
+        return self._client.call("hover", {"target": loc, "tabId": self.id})
+
+    def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
+        """Scroll the page or a specific container."""
+        loc = normalize_locator(target) if target is not None else None
+        return self._client.call("scroll", {"x": x, "y": y, "target": loc, "tabId": self.id})
+
+    def get_text(self, target: TargetLocator) -> str:
+        """Get inner text of an element."""
+        loc = normalize_locator(target)
+        res = self._client.call("get_text", {"target": loc, "tabId": self.id})
+        return res.get("text", "") if isinstance(res, dict) else str(res)
+
+    def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
+        """Get DOM attribute value."""
+        loc = normalize_locator(target)
+        res = self._client.call("get_attribute", {"target": loc, "name": name, "tabId": self.id})
+        return res.get("value") if isinstance(res, dict) else None
+
+    def eval_js(self, script: str, target: Optional[TargetLocator] = None) -> Any:
+        """Execute JavaScript in page context."""
+        loc = normalize_locator(target) if target is not None else None
+        return self._client.call("execute_script", {"code": script, "target": loc, "tabId": self.id})
+
+    def screenshot(self, path: Optional[str] = None) -> str:
+        """Capture page screenshot."""
+        res = self._client.call("screenshot", {"path": path, "tabId": self.id})
+        return res.get("dataUrl") or res.get("data", "")
+
+    def wait_for(self, target: TargetLocator, timeout: float = 10.0, state: str = "visible") -> bool:
+        """Synchronously wait for an element to reach the desired state ('visible', 'hidden', 'attached')."""
+        loc = normalize_locator(target)
+        return self._client.call(
+            "wait_for",
+            {"target": loc, "state": state, "timeout": timeout, "tabId": self.id},
+            timeout=timeout + 3.0,
+        )
+
+    def wait_for_url(self, pattern: str, timeout: float = 15.0) -> bool:
+        """Synchronously wait for current URL to match regex pattern."""
+        return self._client.call(
+            "wait_for_url",
+            {"pattern": pattern, "timeout": timeout, "tabId": self.id},
+            timeout=timeout + 3.0,
+        )
+
+
+class Chrome:
+    """Global Chrome singleton providing fluent active tab control and tab management."""
+
+    def __init__(self, client: Optional[ChromeSocketClient] = None):
+        self._client = client or ChromeSocketClient()
+
+    @property
+    def tabs(self) -> List[Tab]:
+        """List all open browser tabs as scoped Tab handles."""
+        tab_dicts = self._client.call("list_tabs")
+        return [
+            Tab(
+                tab_id=t.get("id"),
+                client=self._client,
+                title=t.get("title", ""),
+                url=t.get("url", ""),
+                active=t.get("active", False),
+            )
+            for t in tab_dicts
+        ]
+
+    @property
+    def active_tab(self) -> Tab:
+        """Get handle for the currently active browser tab."""
+        tabs = self.tabs
+        for t in tabs:
+            if t.active:
+                return t
+        if tabs:
+            return tabs[0]
+        # Fallback tab handle with id=None
+        return Tab(tab_id=None, client=self._client, active=True)
+
+    def tab(self, tab_id: int) -> Tab:
+        """Get a scoped Tab handle by integer ID."""
+        return Tab(tab_id=tab_id, client=self._client)
+
+    def new_tab(self, url: str = "about:blank") -> Tab:
+        """Create and return a new browser tab."""
+        res = self._client.call("navigate", {"url": url, "newTab": True})
+        return Tab(tab_id=res.get("tabId"), client=self._client, url=res.get("url", url), active=True)
+
+    def ping(self) -> Dict[str, Any]:
+        """Ping the native host and extension."""
+        return self._client.call("ping")
+
+    @property
+    def status(self) -> Dict[str, Any]:
+        """Check bridge and extension connection status."""
+        return self._client.call("ping")
+
+    # Delegate active tab methods
+    def snapshot(self, compact: bool = True) -> str:
+        return self.active_tab.snapshot(compact=compact)
+
+    def click(self, target: TargetLocator, button: str = "left", count: int = 1) -> Dict[str, Any]:
+        return self.active_tab.click(target=target, button=button, count=count)
+
+    def type(
+        self,
+        target: TargetLocator,
+        text: str,
+        clear: bool = True,
+        press_enter: bool = False,
+    ) -> Dict[str, Any]:
+        return self.active_tab.type(target=target, text=text, clear=clear, press_enter=press_enter)
+
+    def press_key(self, key: str) -> Dict[str, Any]:
+        return self.active_tab.press_key(key=key)
+
+    def select(self, target: TargetLocator, value: str) -> Dict[str, Any]:
+        return self.active_tab.select(target=target, value=value)
+
+    def hover(self, target: TargetLocator) -> Dict[str, Any]:
+        return self.active_tab.hover(target=target)
+
+    def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
+        return self.active_tab.scroll(x=x, y=y, target=target)
+
+    def get_text(self, target: TargetLocator) -> str:
+        return self.active_tab.get_text(target=target)
+
+    def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
+        return self.active_tab.get_attribute(target=target, name=name)
+
+    def eval_js(self, script: str, target: Optional[TargetLocator] = None) -> Any:
+        return self.active_tab.eval_js(script=script, target=target)
+
+    def screenshot(self, path: Optional[str] = None) -> str:
+        return self.active_tab.screenshot(path=path)
+
+    def wait_for(self, target: TargetLocator, timeout: float = 10.0, state: str = "visible") -> bool:
+        return self.active_tab.wait_for(target=target, timeout=timeout, state=state)
+
+    def wait_for_url(self, pattern: str, timeout: float = 15.0) -> bool:
+        return self.active_tab.wait_for_url(pattern=pattern, timeout=timeout)
+
+    def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
+        return self.active_tab.navigate(url=url, timeout=timeout)
+
+    def back(self) -> Dict[str, Any]:
+        return self.active_tab.back()
+
+    def forward(self) -> Dict[str, Any]:
+        return self.active_tab.forward()
+
+    def reload(self, bypass_cache: bool = False) -> Dict[str, Any]:
+        return self.active_tab.reload(bypass_cache=bypass_cache)
+
+
+# Default global instance
+chrome = Chrome()

@@ -1,0 +1,107 @@
+"""Tests for PythonReplSession and OutputBudgetFormatter."""
+import pytest
+from repl_engine import PythonReplSession, OutputBudgetFormatter
+
+
+def test_basic_expression_evaluation():
+    session = PythonReplSession()
+    out = session.execute("2 + 2")
+    assert "[result]" in out
+    assert "4" in out
+
+
+def test_multi_statement_and_trailing_expression():
+    session = PythonReplSession()
+    code = """
+x = 10
+y = 20
+x + y
+"""
+    out = session.execute(code)
+    assert "[result]" in out
+    assert "30" in out
+
+
+def test_persistent_state_across_calls():
+    session = PythonReplSession()
+    session.execute("a = 42\ndef greet(name):\n    return f'Hello, {name}!'")
+    out = session.execute("greet('Driver') + f' a is {a}'")
+    assert "[result]" in out
+    assert "Hello, Driver! a is 42" in out
+
+
+def test_stdout_and_stderr_capture():
+    session = PythonReplSession()
+    code = """
+import sys
+print("Standard log output")
+print("Warning diagnostic", file=sys.stderr)
+"final_result"
+"""
+    out = session.execute(code)
+    assert "[stdout]" in out
+    assert "Standard log output" in out
+    assert "[stderr]" in out
+    assert "Warning diagnostic" in out
+    assert "[result]" in out
+    assert "final_result" in out
+
+
+def test_executed_successfully_with_no_output():
+    session = PythonReplSession()
+    out = session.execute("z = 100")
+    assert out == "(executed successfully with no output)"
+
+
+def test_last_result_variable_underscore():
+    session = PythonReplSession()
+    session.execute("5 * 5")
+    out = session.execute("_ + 10")
+    assert "[result]" in out
+    assert "35" in out
+
+
+def test_exception_handling_and_formatting():
+    session = PythonReplSession()
+    out = session.execute("1 / 0")
+    assert "[error]" in out
+    assert "ZeroDivisionError" in out
+    assert "[stderr]" in out
+    assert "division by zero" in out
+
+
+def test_structural_pruning_collections():
+    session = PythonReplSession()
+    out = session.execute("list(range(50))")
+    assert "[result]" in out
+    assert "0, 1, 2, 3, 4, 5, 6, 7, 8, 9" in out
+    assert "... (40 more items)" in out
+
+
+def test_structural_pruning_deep_dict():
+    session = PythonReplSession()
+    code = """
+{
+    'level1': {
+        'level2': {
+            'level3': {
+                'level4': 'too deep',
+                'extra': 123
+            }
+        }
+    }
+}
+"""
+    out = session.execute(code)
+    assert "[result]" in out
+    assert "{... 2 keys}" in out or "[... 2 items]" in out or "level3" in out
+
+
+def test_hard_character_cap_head_and_tail():
+    formatter = OutputBudgetFormatter(max_chars=500, string_head_tail=100)
+    huge_str = "A" * 200 + "MIDDLE_TEXT" * 50 + "Z" * 200
+    formatted = formatter.format_execution_result(result=huge_str, has_result=True)
+    assert "[result]" in formatted
+    assert "omitted" in formatted
+    assert formatted.startswith("[result]")
+    assert len(formatted) <= 800

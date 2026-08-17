@@ -6,3 +6,7 @@ server.log
 .DS_Store
 *.png
 !extension/icons/*.png
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

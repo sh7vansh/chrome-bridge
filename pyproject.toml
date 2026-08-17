@@ -1,0 +1,16 @@
+[project]
+name = "antigravity-chrome-bridge"
+version = "2.0.0"
+description = "Persistent Python REPL Runtime and Native Messaging Bridge for Google Chrome"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+chrome-bridge-mcp = "mcp_server:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

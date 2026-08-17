@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Token Budgeting & Output Serialization Prototype</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --error: #f87171;
+      --code-bg: #090d16;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    header {
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      background: var(--card-border);
+      color: var(--text-muted);
+    }
+    .badge.active { background: #0369a1; color: #bae6fd; }
+    .badge.warn { background: #78350f; color: #fef3c7; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 0.5rem;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: #0f172a;
+      font-weight: 600;
+    }
+
+    /* Controls */
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+    }
+
+    button.btn {
+      background: #334155;
+      color: var(--text);
+      border: 1px solid #475569;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-align: center;
+      transition: background 0.15s ease;
+    }
+
+    button.btn:hover {
+      background: #475569;
+    }
+
+    button.btn-primary {
+      background: var(--accent);
+      color: #0f172a;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    button.btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Form sliders */
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    /* State and Output Viewers */
+    pre.code-view {
+      background: var(--code-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      font-size: 0.82rem;
+      color: #e2e8f0;
+      overflow: auto;
+      max-height: 400px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .metric-row {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.85rem;
+      background: rgba(0,0,0,0.2);
+      padding: 0.75rem;
+      border-radius: 6px;
+    }
+
+    .metric-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-value {
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+
+    .metric-value.highlight { color: var(--accent); }
+    .metric-value.warn { color: var(--warning); }
+    .metric-value.success { color: var(--success); }
+
+    .scenario-box {
+      background: rgba(56, 189, 248, 0.05);
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      border-radius: 0 6px 6px 0;
+      font-size: 0.88rem;
+      color: #cbd5e1;
+    }
+
+    .step-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>Decision 04 Prototype: Token Budgeting & Output Serialization</h1>
+    <p class="subtitle">
+      <strong>Core Question:</strong> How should the Python REPL format, pretty-print, and cap output payloads (dataframes, dicts, lists, DOM element summaries) to enforce hard token limits while preserving high-fidelity information for the AI Driver?
+    </p>
+  </header>
+
+  <!-- Walkthrough Scenarios Tabs -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="selectScenario('sc1')">1. Huge Tabular / List Scraping</button>
+    <button class="tab-btn" onclick="selectScenario('sc2')">2. Deeply Nested Dicts / JSON</button>
+    <button class="tab-btn" onclick="selectScenario('sc3')">3. Long Multiline String / Snapshots</button>
+    <button class="tab-btn" onclick="selectScenario('sc4')">4. Mixed Stdout & Return Value</button>
+    <button class="tab-btn" onclick="selectScenario('sc5')">5. SDK Objects (Tabs & Status)</button>
+  </div>
+
+  <div class="scenario-box" id="scenario-desc">
+    <!-- Updated via JS -->
+  </div>
+
+  <div class="grid">
+    <!-- Left Column: Controls & Configuration -->
+    <div class="card">
+      <div class="card-title">
+        <span>Active Configuration & Payload</span>
+        <span class="badge active" id="mode-badge">Scenario Mode</span>
+      </div>
+
+      <!-- Sliders -->
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Max Output Budget (Chars)</span>
+          <span id="char-limit-val">4000</span>
+        </div>
+        <input type="range" id="char-limit" min="500" max="15000" step="500" value="4000" oninput="updateBudgetConfig()">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Max Collection Items</span>
+          <span id="items-limit-val">10</span>
+        </div>
+        <input type="range" id="items-limit" min="3" max="50" step="1" value="10" oninput="updateBudgetConfig()">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Max Nesting Depth</span>
+          <span id="depth-limit-val">3</span>
+        </div>
+        <input type="range" id="depth-limit" min="1" max="6" step="1" value="3" oninput="updateBudgetConfig()">
+      </div>
+
+      <!-- Action Buttons for Current Scenario -->
+      <div class="card-title" style="margin-top: 0.5rem; font-size: 0.95rem;">
+        <span>Interactive Triggers</span>
+      </div>
+      <div class="step-actions" id="scenario-actions">
+        <!-- Buttons injected by scenario -->
+      </div>
+
+      <!-- Free-play Buttons -->
+      <div class="card-title" style="margin-top: 0.5rem; font-size: 0.95rem;">
+        <span>Free-Play Payloads</span>
+      </div>
+      <div class="controls-grid">
+        <button class="btn" onclick="loadRawData('list_500')">500 Item List</button>
+        <button class="btn" onclick="loadRawData('deep_dict')">7-Level Dict</button>
+        <button class="btn" onclick="loadRawData('giant_text')">50KB Article Text</button>
+        <button class="btn" onclick="loadRawData('tab_sdk')">15 Open Tabs</button>
+        <button class="btn" onclick="loadRawData('mixed_stdout')">Stdout + Return</button>
+        <button class="btn" onclick="loadRawData('error_trace')">Exception Trace</button>
+      </div>
+
+      <div class="card-title" style="margin-top: 0.5rem; font-size: 0.95rem;">
+        <span>Input Raw Data Spec</span>
+      </div>
+      <pre class="code-view" style="max-height: 180px;" id="raw-spec-view"></pre>
+    </div>
+
+    <!-- Right Column: Formatted Output & Metrics -->
+    <div class="card">
+      <div class="card-title">
+        <span>Serialized Payload (Sent to LLM)</span>
+        <span class="badge" id="trunc-badge">Not Truncated</span>
+      </div>
+
+      <!-- Metrics -->
+      <div class="metric-row">
+        <div class="metric-item">
+          <span class="metric-label">Raw Chars</span>
+          <span class="metric-value" id="raw-chars">0</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Output Chars</span>
+          <span class="metric-value highlight" id="out-chars">0</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Est. Tokens</span>
+          <span class="metric-value highlight" id="est-tokens">0</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Reduction</span>
+          <span class="metric-value success" id="reduction-pct">0%</span>
+        </div>
+      </div>
+
+      <div class="card-title" style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-muted);">
+        <span>Tool Result Output Format</span>
+      </div>
+      <pre class="code-view" id="serialized-output"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Pure Logic Module: OutputBudgetFormatter -->
+<script>
+/**
+ * PURE LOGIC MODULE: OutputBudgetFormatter
+ * This module is isolated, pure, and can be lifted directly into Python or runtime logic.
+ */
+class OutputBudgetFormatter {
+  constructor(options = {}) {
+    this.maxChars = options.maxChars || 4000;
+    this.maxItems = options.maxItems || 10;
+    this.maxDepth = options.maxDepth || 3;
+    this.stringHeadTail = options.stringHeadTail || 500;
+  }
+
+  /**
+   * Main entrypoint to serialize REPL turn results into a token-budgeted string.
+   */
+  formatExecutionResult({ stdout = "", stderr = "", result = undefined, error = null }) {
+    let sections = [];
+    let isTruncated = false;
+
+    // 1. Handle Stderr or Errors first
+    if (error) {
+      sections.push(`[error]\n${this._truncateString(error, 1500)}`);
+    }
+
+    if (stderr && stderr.trim()) {
+      sections.push(`[stderr]\n${this._truncateString(stderr.trim(), 1000)}`);
+    }
+
+    // 2. Handle Stdout
+    if (stdout && stdout.trim()) {
+      let budgetForStdout = Math.floor(this.maxChars * 0.4);
+      let truncatedStdout = this._truncateString(stdout.trim(), budgetForStdout);
+      if (truncatedStdout.length < stdout.trim().length) isTruncated = true;
+      sections.push(`[stdout]\n${truncatedStdout}`);
+    }
+
+    // 3. Handle Return Value (Result)
+    if (result !== undefined) {
+      let budgetForVal = this.maxChars - sections.join("\n\n").length;
+      if (budgetForVal < 800) budgetForVal = 800;
+
+      let { formatted, truncated } = this._serializeValue(result, 0, budgetForVal);
+      if (truncated) isTruncated = true;
+
+      // Final length safety check
+      if (formatted.length > budgetForVal) {
+        formatted = this._truncateString(formatted, budgetForVal);
+        isTruncated = true;
+      }
+
+      sections.push(`[result]\n${formatted}`);
+    }
+
+    let finalOutput = sections.length > 0 ? sections.join("\n\n") : "(no output or return value)";
+    
+    return {
+      output: finalOutput,
+      isTruncated,
+      charCount: finalOutput.length,
+      estimatedTokens: Math.ceil(finalOutput.length / 3.8)
+    };
+  }
+
+  /**
+   * Structurally serialize and prune arbitrary values based on depth and collection size.
+   */
+  _serializeValue(val, currentDepth = 0, budget = 2000) {
+    if (val === null) return { formatted: "None", truncated: false };
+    if (val === undefined) return { formatted: "None", truncated: false };
+
+    // Primitive types
+    if (typeof val === "boolean") return { formatted: val ? "True" : "False", truncated: false };
+    if (typeof val === "number") return { formatted: String(val), truncated: false };
+    
+    if (typeof val === "string") {
+      if (val.length > budget || (val.length > 600 && currentDepth > 0)) {
+        let maxStr = Math.min(budget, 600);
+        return { formatted: `"${this._truncateString(val, maxStr)}"`, truncated: true };
+      }
+      return { formatted: JSON.stringify(val), truncated: false };
+    }
+
+    // Custom Representation for Tab or SDK objects
+    if (val && val.__repr__) {
+      return { formatted: val.__repr__, truncated: false };
+    }
+
+    // Depth Cap
+    if (currentDepth >= this.maxDepth) {
+      if (Array.isArray(val)) return { formatted: `[... ${val.length} items]`, truncated: true };
+      if (typeof val === "object") return { formatted: `{... ${Object.keys(val).length} keys}`, truncated: true };
+    }
+
+    // Arrays / Lists
+    if (Array.isArray(val)) {
+      let isTruncated = false;
+      let itemsToShow = val.slice(0, this.maxItems);
+      let rendered = [];
+
+      for (let item of itemsToShow) {
+        let res = this._serializeValue(item, currentDepth + 1, Math.floor(budget / itemsToShow.length));
+        rendered.push(res.formatted);
+        if (res.truncated) isTruncated = true;
+      }
+
+      if (val.length > this.maxItems) {
+        let remaining = val.length - this.maxItems;
+        rendered.push(`... (${remaining} more items)`);
+        isTruncated = true;
+      }
+
+      // Compact vs Multi-line
+      let singleLine = `[${rendered.join(", ")}]`;
+      if (singleLine.length <= 80 && !singleLine.includes("\n")) {
+        return { formatted: singleLine, truncated: isTruncated };
+      }
+
+      let indent = "  ".repeat(currentDepth + 1);
+      let closingIndent = "  ".repeat(currentDepth);
+      let multiLine = `[\n${rendered.map(r => `${indent}${r.split("\n").join(`\n${indent}`)}`).join(",\n")}\n${closingIndent}]`;
+      return { formatted: multiLine, truncated: isTruncated };
+    }
+
+    // Objects / Dictionaries
+    if (typeof val === "object") {
+      let isTruncated = false;
+      let keys = Object.keys(val);
+      let keysToShow = keys.slice(0, this.maxItems);
+      let rendered = [];
+
+      for (let k of keysToShow) {
+        let res = this._serializeValue(val[k], currentDepth + 1, Math.floor(budget / keysToShow.length));
+        rendered.push(`'${k}': ${res.formatted}`);
+        if (res.truncated) isTruncated = true;
+      }
+
+      if (keys.length > this.maxItems) {
+        let remaining = keys.length - this.maxItems;
+        rendered.push(`... (${remaining} more keys)`);
+        isTruncated = true;
+      }
+
+      let singleLine = `{${rendered.join(", ")}}`;
+      if (singleLine.length <= 80 && !singleLine.includes("\n")) {
+        return { formatted: singleLine, truncated: isTruncated };
+      }
+
+      let indent = "  ".repeat(currentDepth + 1);
+      let closingIndent = "  ".repeat(currentDepth);
+      let multiLine = `{\n${rendered.map(r => `${indent}${r.split("\n").join(`\n${indent}`)}`).join(",\n")}\n${closingIndent}}`;
+      return { formatted: multiLine, truncated: isTruncated };
+    }
+
+    return { formatted: String(val), truncated: false };
+  }
+
+  /**
+   * Head-and-tail string truncation with explicit omission marker.
+   */
+  _truncateString(str, maxLen) {
+    if (str.length <= maxLen) return str;
+    let keepEach = Math.floor((maxLen - 40) / 2);
+    if (keepEach < 20) keepEach = 20;
+
+    let head = str.slice(0, keepEach);
+    let tail = str.slice(str.length - keepEach);
+    let omitted = str.length - (head.length + tail.length);
+
+    return `${head}\n... [${omitted} chars / ${Math.ceil(omitted / 4)} tokens omitted] ...\n${tail}`;
+  }
+}
+</script>
+
+<!-- UI Harness & Scenarios Logic -->
+<script>
+// Preset Scenarios
+const SCENARIOS = {
+  sc1: {
+    title: "Scenario 1: Large List Scraped from Table",
+    desc: "The agent runs a loop scraping 150 rows from a product table. Returning a raw JSON array would consume 30,000+ tokens and blow the context window. Watch how the formatter maintains high fidelity for the first rows while cleanly pruning the tail.",
+    actions: [
+      { name: "Scrape 15 Rows (Small)", fn: () => runScrapeDemo(15) },
+      { name: "Scrape 150 Rows (Large)", fn: () => runScrapeDemo(150) },
+      { name: "Scrape 1000 Rows (Massive)", fn: () => runScrapeDemo(1000) }
+    ],
+    defaultRun: () => runScrapeDemo(150)
+  },
+  sc2: {
+    title: "Scenario 2: Deeply Nested Hierarchy & JSON",
+    desc: "The agent inspects a complex GraphQL state or multi-nested DOM tree object (6 levels deep). Depth budgeting caps runaway indentation and replaces subtrees with concise token counters `[... N items]`.",
+    actions: [
+      { name: "3-Level Nested State", fn: () => runNestedDemo(3) },
+      { name: "6-Level Deep Tree", fn: () => runNestedDemo(6) },
+      { name: "Wide Object (80 keys)", fn: () => runWideDictDemo(80) }
+    ],
+    defaultRun: () => runNestedDemo(6)
+  },
+  sc3: {
+    title: "Scenario 3: Massive Multiline String / DOM Snapshot",
+    desc: "The driver fetches an entire article body (45,000 characters). Instead of failing or silently clipping off the end, head-and-tail preservation ensures the agent sees the beginning context, end conclusions, and exact omitted char counts.",
+    actions: [
+      { name: "5KB Text (Under Budget)", fn: () => runTextDemo(3000) },
+      { name: "25KB Full Article", fn: () => runTextDemo(25000) },
+      { name: "75KB Full HTML Dump", fn: () => runTextDemo(75000) }
+    ],
+    defaultRun: () => runTextDemo(25000)
+  },
+  sc4: {
+    title: "Scenario 4: Mixed Stdout & Return Value",
+    desc: "A script prints diagnostic messages or progress ticks during execution, then returns a final result dict. The formatter partitions standard output into an explicit `[stdout]` section and return payload into `[result]`.",
+    actions: [
+      { name: "Clean Return (No Stdout)", fn: () => runMixedDemo(0) },
+      { name: "Normal Prints + Result", fn: () => runMixedDemo(5) },
+      { name: "Heavy Logging (100 prints) + Result", fn: () => runMixedDemo(100) }
+    ],
+    defaultRun: () => runMixedDemo(5)
+  },
+  sc5: {
+    title: "Scenario 5: SDK Objects (Tab Handles & Action Status)",
+    desc: "When `chrome.tabs` or `chrome.click('[#1]')` is evaluated, the REPL formats high-level SDK representations (`<Tab id=1 ...>`) rather than dumping the internal Python object memory pointers.",
+    actions: [
+      { name: "chrome.tabs (5 Tabs)", fn: () => runTabsDemo(5) },
+      { name: "chrome.tabs (25 Tabs)", fn: () => runTabsDemo(25) },
+      { name: "chrome.click('[#4]') Status", fn: () => runActionStatusDemo() }
+    ],
+    defaultRun: () => runTabsDemo(5)
+  }
+};
+
+let currentScenarioKey = 'sc1';
+let currentPayload = {};
+
+function selectScenario(key) {
+  currentScenarioKey = key;
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  event.target.classList.add('active');
+
+  let sc = SCENARIOS[key];
+  document.getElementById('scenario-desc').innerHTML = `<strong>${sc.title}</strong>: ${sc.desc}`;
+
+  // Render actions
+  let actContainer = document.getElementById('scenario-actions');
+  actContainer.innerHTML = '';
+  sc.actions.forEach((act, idx) => {
+    let btn = document.createElement('button');
+    btn.className = idx === 1 ? 'btn btn-primary' : 'btn';
+    btn.innerText = act.name;
+    btn.onclick = () => {
+      act.fn();
+      renderCurrentPayload();
+    };
+    actContainer.appendChild(btn);
+  });
+
+  sc.defaultRun();
+  renderCurrentPayload();
+}
+
+function updateBudgetConfig() {
+  document.getElementById('char-limit-val').innerText = document.getElementById('char-limit').value;
+  document.getElementById('items-limit-val').innerText = document.getElementById('items-limit').value;
+  document.getElementById('depth-limit-val').innerText = document.getElementById('depth-limit').value;
+  renderCurrentPayload();
+}
+
+function renderCurrentPayload() {
+  let maxChars = parseInt(document.getElementById('char-limit').value, 10);
+  let maxItems = parseInt(document.getElementById('items-limit').value, 10);
+  let maxDepth = parseInt(document.getElementById('depth-limit').value, 10);
+
+  let formatter = new OutputBudgetFormatter({ maxChars, maxItems, maxDepth });
+  let res = formatter.formatExecutionResult(currentPayload);
+
+  // Raw json estimate
+  let rawJson = JSON.stringify(currentPayload);
+  let rawLength = rawJson.length;
+
+  document.getElementById('raw-chars').innerText = rawLength.toLocaleString();
+  document.getElementById('out-chars').innerText = res.charCount.toLocaleString();
+  document.getElementById('est-tokens').innerText = res.estimatedTokens.toLocaleString();
+
+  let reduction = rawLength > 0 ? Math.max(0, Math.round((1 - res.charCount / rawLength) * 100)) : 0;
+  document.getElementById('reduction-pct').innerText = `${reduction}%`;
+
+  let truncBadge = document.getElementById('trunc-badge');
+  if (res.isTruncated) {
+    truncBadge.className = 'badge warn';
+    truncBadge.innerText = 'Truncated for Budget';
+  } else {
+    truncBadge.className = 'badge';
+    truncBadge.innerText = 'Within Budget';
+  }
+
+  document.getElementById('serialized-output').innerText = res.output;
+}
+
+// Scenario Generators
+function runScrapeDemo(count) {
+  let rows = [];
+  for (let i = 1; i <= count; i++) {
+    rows.push({
+      rank: i,
+      title: `Product Listing Headline #${i} with High-Quality Features & Reviews`,
+      price: `$${(i * 12.99).toFixed(2)}`,
+      rating: 4.5 + (i % 5) * 0.1,
+      in_stock: i % 3 !== 0,
+      sku: `PROD-SKU-${10000 + i}`
+    });
+  }
+
+  currentPayload = {
+    stdout: `Found ${count} matching table rows matching selector 'table.product-list tr'`,
+    result: rows
+  };
+  document.getElementById('raw-spec-view').innerText = `Scraped List: ${count} dict records\nKeys per row: rank, title, price, rating, in_stock, sku`;
+}
+
+function runNestedDemo(depth) {
+  function makeTree(d) {
+    if (d <= 0) return { node_type: "Text", content: "Interactive Element Target", ref_id: "[#42]" };
+    return {
+      tag: "div",
+      class_name: `container-level-${d}`,
+      children: [
+        makeTree(d - 1),
+        { tag: "span", text: `Auxiliary label level ${d}` }
+      ],
+      metadata: { visible: true, rect: { x: 10 * d, y: 20 * d, width: 300, height: 50 } }
+    };
+  }
+
+  currentPayload = {
+    stdout: `Inspecting subtree at depth ${depth}`,
+    result: makeTree(depth)
+  };
+  document.getElementById('raw-spec-view').innerText = `Nested Tree Hierarchy: Depth ${depth}\nIncludes recursive children arrays and metadata`;
+}
+
+function runWideDictDemo(numKeys) {
+  let obj = {};
+  for (let i = 1; i <= numKeys; i++) {
+    obj[`field_${i}_attribute_name`] = `Value for attribute ${i} with sample configuration data`;
+  }
+  currentPayload = {
+    stdout: `Extracted ${numKeys} global state parameters`,
+    result: obj
+  };
+  document.getElementById('raw-spec-view').innerText = `Wide Dictionary: ${numKeys} top-level key/value pairs`;
+}
+
+function runTextDemo(charCount) {
+  let sampleParagraph = "Antigravity Chrome Bridge enables AI agent drivers to communicate directly with active Google Chrome sessions via a persistent Python REPL runtime. High-density snapshots compress interactive DOM state, and polymorphic locators streamline clicks and input typing. ";
+  let fullText = "";
+  while (fullText.length < charCount) {
+    fullText += sampleParagraph;
+  }
+  fullText = fullText.slice(0, charCount);
+
+  currentPayload = {
+    stdout: `Extracted article body text (${charCount} chars)`,
+    result: fullText
+  };
+  document.getElementById('raw-spec-view').innerText = `Large Text String:\nTotal Chars: ${charCount}\nSimulates full page body or long article extraction`;
+}
+
+function runMixedDemo(printCount) {
+  let stdoutLines = [];
+  for (let i = 1; i <= printCount; i++) {
+    stdoutLines.push(`[INFO 21:30:${10 + (i % 50)}] Step ${i}: Processing DOM node [#${i}] -> Verified clickability`);
+  }
+
+  currentPayload = {
+    stdout: stdoutLines.join("\n"),
+    result: { status: "success", processed_count: printCount, duration_ms: printCount * 14.2 }
+  };
+  document.getElementById('raw-spec-view').innerText = `Mixed Execution:\nStdout Lines: ${printCount}\nReturn Value: Status summary dictionary`;
+}
+
+function runTabsDemo(tabCount) {
+  let tabs = [];
+  for (let i = 1; i <= tabCount; i++) {
+    tabs.push({
+      __repr__: `<Tab id=${i} title="Tab #${i} - Page Navigation Title" url="https://example.com/page/${i}" active=${i === 1 ? 'True' : 'False'}>`
+    });
+  }
+  currentPayload = {
+    result: tabs
+  };
+  document.getElementById('raw-spec-view').innerText = `SDK Tab Handles: List of ${tabCount} Tab instances with custom __repr__ formatting`;
+}
+
+function runActionStatusDemo() {
+  currentPayload = {
+    result: { status: "ok", action: "click", target: "[#4]", tab_id: 1294812, duration_ms: 38 }
+  };
+  document.getElementById('raw-spec-view').innerText = `Action Acknowledgment:\nLightweight status dict returned by mutating actions`;
+}
+
+function loadRawData(type) {
+  if (type === 'list_500') runScrapeDemo(500);
+  if (type === 'deep_dict') runNestedDemo(7);
+  if (type === 'giant_text') runTextDemo(50000);
+  if (type === 'tab_sdk') runTabsDemo(15);
+  if (type === 'mixed_stdout') runMixedDemo(25);
+  if (type === 'error_trace') {
+    currentPayload = {
+      stderr: "Traceback (most recent call last):\n  File \"<repl>\", line 2, in <module>\n    chrome.click('[#99]')\n  File \"chrome_sdk.py\", line 112, in click\n    raise ElementNotFoundError(target, self.id)",
+      error: "ElementNotFoundError: Element matching '[#99]' not found in tab 1294812. The DOM may have changed since the last snapshot."
+    };
+    document.getElementById('raw-spec-view').innerText = `Exception Scenario:\nStderr stack trace + structured error message`;
+  }
+  renderCurrentPayload();
+}
+
+// Initialize on load
+window.addEventListener('DOMContentLoaded', () => {
+  selectScenario('sc1');
+});
+</script>
+
+</body>
+</html>
