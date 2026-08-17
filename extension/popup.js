@@ -143,8 +143,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mcpConfig = {
       mcpServers: {
         "chrome-bridge": {
-          "command": "node",
-          "args": ["/path/to/antigravity-chrome-bridge/mcp-server.mjs"]
+          "command": "python3",
+          "args": ["/path/to/antigravity-chrome-bridge/mcp_server.py"]
         }
       }
     };

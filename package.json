@@ -1,32 +1,22 @@
 {
   "name": "antigravity-chrome-bridge",
-  "version": "1.0.0",
-  "description": "Native Model Context Protocol (MCP) server & Chrome Extension for AI browser automation",
-  "main": "mcp-server.mjs",
+  "version": "2.0.0",
+  "description": "Chrome Bridge 2.0 - Persistent Python REPL Runtime & Chrome Extension for AI browser automation",
   "type": "module",
-  "bin": {
-    "chrome-bridge-mcp": "./mcp-server.mjs"
-  },
   "scripts": {
     "test": ".venv/bin/pytest -v",
     "test:all": "./test.sh",
     "setup": "node setup-host.mjs",
-    "mcp": ".venv/bin/python mcp_server.py",
-    "cli": "node ctl.mjs",
-    "bridge": "node bridge.mjs"
+    "mcp": ".venv/bin/python mcp_server.py"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
     "chrome-extension",
     "browser-automation",
+    "python-repl",
     "antigravity"
   ],
   "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "ws": "^8.21.3",
-    "zod": "^3.24.2"
-  }
+  "license": "MIT"
 }

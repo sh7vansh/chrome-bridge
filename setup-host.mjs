@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST_NAME = 'com.antigravity.chrome_bridge';
 const EXTENSION_ID = 'nbghhppoiigjbdjbhefiaijofpnhgepb';
 const HOST_SCRIPT = join(__dirname, 'native-host.mjs');
-const MCP_PYTHON_SCRIPT = join(__dirname, 'mcp-server.py');
+const MCP_PYTHON_SCRIPT = join(__dirname, 'mcp_server.py');
 const VENV_PYTHON = join(__dirname, '.venv', 'bin', 'python3');
 const PYTHON_CMD = existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3';
 
