@@ -147,19 +147,46 @@ async function resolveTabId(specifiedId) {
 
 async function executeInPage(tabId, operation, args = {}) {
   const targetId = await resolveTabId(tabId);
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: targetId },
-    func: inPageDOMOperation,
-    args: [{ operation, args }]
-  });
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetId },
+      func: inPageDOMOperation,
+      args: [{ operation, args }]
+    });
 
-  const res = results[0]?.result;
-  if (res && res.__error) {
-    const customErr = new Error(res.__error.message || `Action error: ${res.__error.code}`);
-    customErr.structuredError = res.__error;
-    throw customErr;
+    const res = results[0]?.result;
+    if (res && res.__error) {
+      const customErr = new Error(res.__error.message || `Action error: ${res.__error.code}`);
+      customErr.structuredError = res.__error;
+      throw customErr;
+    }
+    return res;
+  } catch (err) {
+    if (err.structuredError) throw err;
+    const errMsg = err.message || '';
+    // If context was detached during an async wait due to a hard page navigation, retry after tab loads
+    if (errMsg.includes('frame was detached') || errMsg.includes('Cannot access contents of url') || errMsg.includes('tab was closed')) {
+      if (operation === 'wait_for' || operation === 'wait_for_url') {
+        await new Promise(r => setTimeout(r, 400));
+        const tab = await chrome.tabs.get(targetId).catch(() => null);
+        if (tab && tab.status === 'complete') {
+          const retryResults = await chrome.scripting.executeScript({
+            target: { tabId: targetId },
+            func: inPageDOMOperation,
+            args: [{ operation, args }]
+          });
+          const retryRes = retryResults[0]?.result;
+          if (retryRes && retryRes.__error) {
+            const customErr = new Error(retryRes.__error.message || `Action error: ${retryRes.__error.code}`);
+            customErr.structuredError = retryRes.__error;
+            throw customErr;
+          }
+          return retryRes;
+        }
+      }
+    }
+    throw err;
   }
-  return res;
 }
 
 async function handleAction(action, params) {
@@ -303,77 +330,21 @@ async function handleAction(action, params) {
 
     case 'wait_for': {
       const targetId = await resolveTabId(params.tabId);
-      const timeout = params.timeout || 10.0;
-      const startTime = Date.now();
-      while (Date.now() - startTime < timeout * 1000) {
-        try {
-          const res = await executeInPage(targetId, 'wait_for', { target: params.target, state: params.state });
-          if (res.matched) return true;
-        } catch {}
-        await new Promise(r => setTimeout(r, 200));
-      }
-      
-      // Introspect DOM state for rich error diagnostics
-      let readyState = 'unknown';
-      let domState = 'unknown';
-      let url = '';
-      try {
-        const intro = await executeInPage(targetId, 'introspect_timeout', { target: params.target });
-        readyState = intro.readyState || readyState;
-        domState = intro.domState || domState;
-        url = intro.url || url;
-      } catch {}
-
-      const err = new Error(`Timed out waiting for element`);
-      err.structuredError = {
-        code: 'TIMEOUT',
-        target: String(params.target),
-        timeout,
-        tabId: targetId,
-        url,
-        readyState,
-        domState
-      };
-      throw err;
+      const res = await executeInPage(targetId, 'wait_for', {
+        target: params.target || params.selector,
+        state: params.state || 'visible',
+        timeout: params.timeout || 10.0
+      });
+      return res?.matched !== false;
     }
 
     case 'wait_for_url': {
       const targetId = await resolveTabId(params.tabId);
-      const timeout = params.timeout || 15.0;
-      const startTime = Date.now();
-      while (Date.now() - startTime < timeout * 1000) {
-        try {
-          const res = await executeInPage(targetId, 'wait_for_url', { pattern: params.pattern });
-          if (res.matched) return true;
-        } catch {}
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      let readyState = 'unknown';
-      let domState = 'unknown';
-      let url = '';
-      try {
-        const tab = await chrome.tabs.get(targetId);
-        url = tab.url || '';
-      } catch {}
-      try {
-        const intro = await executeInPage(targetId, 'introspect_timeout', { target: params.pattern });
-        readyState = intro.readyState || readyState;
-        domState = intro.domState || domState;
-        url = intro.url || url;
-      } catch {}
-
-      const err = new Error(`Timed out waiting for URL pattern`);
-      err.structuredError = {
-        code: 'TIMEOUT',
-        target: params.pattern,
-        timeout,
-        tabId: targetId,
-        url,
-        readyState,
-        domState
-      };
-      throw err;
+      const res = await executeInPage(targetId, 'wait_for_url', {
+        pattern: params.pattern,
+        timeout: params.timeout || 15.0
+      });
+      return res?.matched !== false;
     }
 
     case 'execute_script': {

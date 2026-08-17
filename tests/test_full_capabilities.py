@@ -302,3 +302,49 @@ def test_mcp_server_stdio_jsonrpc():
             proc.wait(timeout=2)
         except Exception:
             proc.kill()
+
+
+def test_wait_for_and_wait_for_url_synchronization(mock_bridge):
+    # Mock wait_for and wait_for_url responses
+    mock_bridge.responses["wait_for"] = lambda p: True
+    mock_bridge.responses["wait_for_url"] = lambda p: True
+
+    client = ChromeSocketClient(socket_path=mock_bridge.socket_path)
+    chrome = Chrome(client=client)
+    session = PythonReplSession(globals_dict={"chrome": chrome})
+
+    code = """
+res1 = chrome.wait_for('[#2]', timeout=2.0)
+res2 = chrome.wait_for_url(r'https://.*', timeout=2.0)
+(res1, res2)
+"""
+    out = session.execute(code)
+    assert "[result]" in out
+    assert "(True, True)" in out
+
+
+def test_wait_for_timeout_diagnostics(mock_bridge):
+    # Mock wait_for timeout error with auto_snapshot
+    mock_bridge.responses["wait_for"] = lambda p: {
+        "__error": {
+            "code": "TIMEOUT",
+            "target": str(p.get("target")),
+            "timeout": 2.0,
+            "readyState": "complete",
+            "domState": "hidden in DOM (display: none)",
+            "url": "https://example.com/checkout",
+            "auto_snapshot": "PAGE: \"Checkout\" (https://example.com/checkout)\n- button [#1] \"Pay Now\""
+        }
+    }
+
+    client = ChromeSocketClient(socket_path=mock_bridge.socket_path)
+    chrome = Chrome(client=client)
+    session = PythonReplSession(globals_dict={"chrome": chrome})
+
+    out = session.execute("chrome.wait_for('[#99]', timeout=2.0)")
+    assert "[error]" in out
+    assert "NavigationTimeoutError" in out
+    assert "hidden in DOM (display: none)" in out
+    assert "[diagnostic_auto_snapshot]" in out
+    assert "PAGE: \"Checkout\"" in out
+

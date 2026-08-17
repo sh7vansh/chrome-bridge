@@ -46,6 +46,10 @@ _Avoid_: Session scope, context wrapper, execution target
 The isolated execution module injected into web pages by the Chrome extension, responsible for Semantic DOM Snapshot generation, accessibility tree traversal, Ref-ID indexing, and pointer hit-testing verification.
 _Avoid_: Content script injector, page crawler, DOM scraper
 
+**In-Page DOM Synchronizer**:
+The event-driven observation sub-module inside the In-Page DOM Engine that resolves element lifecycle conditions (`visible`, `hidden`, `attached`) and URL transitions asynchronously via `MutationObserver`, animation/navigation hooks, and rich diagnostic auto-snapshots on timeout, without service worker polling loops.
+_Avoid_: Polling watcher, wait interval, sleep loop
+
 **Diagnostic Auto-Snapshot**:
 A token-budgeted Semantic DOM Snapshot automatically injected into action failure exception payloads to facilitate single-turn Driver self-healing.
 _Avoid_: Error snapshot, debug dump, recovery screenshot
@@ -69,5 +73,5 @@ _Avoid_: Element marker, bounding box injector, visual debugger
 2. **Encapsulated Diagnostics**: All failure modes must resolve to high-level domain exceptions (`BrowserUnavailableError`, `ElementNotFoundError`, `ActionInterceptionError`, `NavigationTimeoutError`) equipped with self-healing Semantic DOM auto-snapshots.
 3. **Pristine Tracebacks**: Execution stack traces must strictly filter out internal socket/IPC mechanics, surfacing only user `<repl>` frames and public `chrome.*` methods.
 4. **Single-Roundtrip Action Dispatch**: Procedural actions dispatched against top-level `chrome` or scoped `Tab` handles must never incur secondary discovery roundtrips (`list_tabs`) for active tab resolution.
-5. **Decoupled DOM Execution**: In-page DOM inspection, snapshotting, and hit-testing logic must remain strictly decoupled from background transport routing.
+5. **Decoupled DOM Execution & Event-Driven Synchronization**: In-page DOM inspection, snapshotting, hit-testing, and condition synchronization (`MutationObserver`) must remain strictly decoupled from background transport routing, executing asynchronously inside the page context without background polling loops.
 

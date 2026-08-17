@@ -77,3 +77,27 @@ raise ElementNotFoundError(
     assert "[error]" in out
     assert "ElementNotFoundError" in out
     assert "Did you mean: [#18] (button 'Submit')?" in out
+
+
+def test_navigation_timeout_error_with_auto_snapshot():
+    err = NavigationTimeoutError(
+        target="[#99]",
+        timeout=5.0,
+        url="https://app.example.com",
+        ready_state="complete",
+        dom_state="absent from DOM",
+        tab_id=1
+    )
+    err.auto_snapshot = "PAGE: \"Dashboard\" (https://app.example.com)\n- heading \"Dashboard\"\n- button [#1] \"Logout\""
+    
+    session = PythonReplSession()
+    out = session.formatter.format_execution_result(
+        error=str(err),
+        auto_snapshot=err.auto_snapshot
+    )
+    assert "[error]" in out
+    assert "Timed out after 5.0s waiting for '[#99]'" in out
+    assert "[diagnostic_auto_snapshot]" in out
+    assert "PAGE: \"Dashboard\"" in out
+    assert "button [#1] \"Logout\"" in out
+

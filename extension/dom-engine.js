@@ -368,6 +368,205 @@ export function inPageDOMOperation(payload) {
     return { present: true, domState: 'visible in DOM' };
   }
 
+  function waitForCondition(target, state = 'visible', timeout = 10.0) {
+    return new Promise((resolve) => {
+      const timeoutMs = (timeout || 10.0) * 1000;
+      const startTime = performance.now();
+
+      function checkCondition() {
+        const res = resolveTarget(target);
+        if (state === 'attached') {
+          return !res.error && res.el && res.el.isConnected;
+        }
+        if (state === 'hidden') {
+          return res.error || !res.el || !isVisible(res.el);
+        }
+        // default 'visible'
+        return !res.error && res.el && isVisible(res.el);
+      }
+
+      // Fast-path check
+      if (checkCondition()) {
+        return resolve({ matched: true, elapsed: performance.now() - startTime });
+      }
+
+      let resolved = false;
+      let observer = null;
+      let timer = null;
+
+      function cleanup() {
+        if (observer) {
+          try { observer.disconnect(); } catch {}
+          observer = null;
+        }
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        window.removeEventListener('transitionend', onActivity);
+        window.removeEventListener('animationend', onActivity);
+        window.removeEventListener('popstate', onActivity);
+        window.removeEventListener('hashchange', onActivity);
+      }
+
+      function onActivity() {
+        if (resolved) return;
+        if (checkCondition()) {
+          resolved = true;
+          cleanup();
+          resolve({ matched: true, elapsed: performance.now() - startTime });
+        }
+      }
+
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+
+        const intro = introspectDOMState(target);
+        let autoSnapshot = '';
+        try {
+          const snapRes = generateSnapshot();
+          autoSnapshot = snapRes.snapshot || '';
+        } catch {}
+
+        let targetLabel = String(target);
+        if (typeof target === 'object' && target !== null) {
+          if (target.refId !== undefined) targetLabel = `[#${target.refId}]`;
+          else if (target.selector) targetLabel = target.selector;
+        }
+
+        resolve({
+          __error: {
+            code: 'TIMEOUT',
+            target: targetLabel,
+            timeout,
+            readyState: document.readyState,
+            domState: intro.domState,
+            url: window.location.href,
+            auto_snapshot: autoSnapshot
+          }
+        });
+      }, timeoutMs);
+
+      try {
+        observer = new MutationObserver(() => {
+          onActivity();
+        });
+        const targetNode = document.documentElement || document.body;
+        if (targetNode) {
+          observer.observe(targetNode, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class', 'hidden', 'aria-hidden', 'inert', 'disabled']
+          });
+        }
+      } catch {}
+
+      window.addEventListener('transitionend', onActivity);
+      window.addEventListener('animationend', onActivity);
+      window.addEventListener('popstate', onActivity);
+      window.addEventListener('hashchange', onActivity);
+
+      // Micro-interval fallback for complex off-DOM transitions
+      const interval = setInterval(() => {
+        if (resolved) {
+          clearInterval(interval);
+          return;
+        }
+        onActivity();
+      }, 250);
+    });
+  }
+
+  function waitForUrl(pattern, timeout = 15.0) {
+    return new Promise((resolve) => {
+      const timeoutMs = (timeout || 15.0) * 1000;
+      const startTime = performance.now();
+      const regex = new RegExp(pattern);
+
+      function checkUrl() {
+        return regex.test(window.location.href);
+      }
+
+      if (checkUrl()) {
+        return resolve({ matched: true, currentUrl: window.location.href, elapsed: performance.now() - startTime });
+      }
+
+      let resolved = false;
+      let timer = null;
+      let observer = null;
+
+      function cleanup() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (observer) {
+          try { observer.disconnect(); } catch {}
+          observer = null;
+        }
+        window.removeEventListener('popstate', onUrlEvent);
+        window.removeEventListener('hashchange', onUrlEvent);
+      }
+
+      function onUrlEvent() {
+        if (resolved) return;
+        if (checkUrl()) {
+          resolved = true;
+          cleanup();
+          resolve({ matched: true, currentUrl: window.location.href, elapsed: performance.now() - startTime });
+        }
+      }
+
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+
+        let autoSnapshot = '';
+        try {
+          const snapRes = generateSnapshot();
+          autoSnapshot = snapRes.snapshot || '';
+        } catch {}
+
+        resolve({
+          __error: {
+            code: 'TIMEOUT',
+            target: pattern,
+            timeout,
+            readyState: document.readyState,
+            domState: `URL is '${window.location.href}' (did not match pattern '${pattern}')`,
+            url: window.location.href,
+            auto_snapshot: autoSnapshot
+          }
+        });
+      }, timeoutMs);
+
+      window.addEventListener('popstate', onUrlEvent);
+      window.addEventListener('hashchange', onUrlEvent);
+
+      try {
+        observer = new MutationObserver(() => {
+          onUrlEvent();
+        });
+        const targetNode = document.documentElement || document.body;
+        if (targetNode) {
+          observer.observe(targetNode, { childList: true, subtree: false });
+        }
+      } catch {}
+
+      const interval = setInterval(() => {
+        if (resolved) {
+          clearInterval(interval);
+          return;
+        }
+        onUrlEvent();
+      }, 200);
+    });
+  }
+
   switch (operation) {
     case 'snapshot':
       return generateSnapshot();
@@ -522,25 +721,13 @@ export function inPageDOMOperation(payload) {
     }
 
     case 'wait_for': {
-      const { target, state = 'visible' } = args;
-      const res = resolveTarget(target);
-      if (state === 'attached') {
-        const attached = !res.error && res.el && res.el.isConnected;
-        return { matched: attached };
-      }
-      if (state === 'hidden') {
-        const hidden = res.error || !res.el || !isVisible(res.el);
-        return { matched: hidden };
-      }
-      // visible
-      const visible = !res.error && res.el && isVisible(res.el);
-      return { matched: visible };
+      const { target, state = 'visible', timeout = 10.0 } = args;
+      return waitForCondition(target, state, timeout);
     }
 
     case 'wait_for_url': {
-      const { pattern } = args;
-      const regex = new RegExp(pattern);
-      return { matched: regex.test(window.location.href), currentUrl: window.location.href };
+      const { pattern, timeout = 15.0 } = args;
+      return waitForUrl(pattern, timeout);
     }
 
     case 'highlight_refs': {
