@@ -4,10 +4,23 @@ import json
 import os
 import re
 import socket
+import sys
 import time
 from typing import Any, Dict, List, Optional, Union
 
 import tempfile
+
+# Ensure UTF-8 streams cross-platform (especially on Windows)
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 DEFAULT_SOCKET_PATH = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
 DEFAULT_PORT_FILE = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
@@ -191,7 +204,7 @@ class ChromeSocketClient:
                 if use_tcp:
                     if not os.path.exists(self.port_file):
                         raise FileNotFoundError(f"Port file '{self.port_file}' does not exist.")
-                    with open(self.port_file, "r", encoding="utf-8") as f:
+                    with open(self.port_file, "r", encoding="utf-8", errors="replace") as f:
                         port_str = f.read().strip()
                     if not port_str:
                         raise ValueError("Port file is empty.")
@@ -240,7 +253,7 @@ class ChromeSocketClient:
                     line, self._buffer = self._buffer.split(b"\n", 1)
                     if not line.strip():
                         continue
-                    resp = json.loads(line.decode("utf-8"))
+                    resp = json.loads(line.decode("utf-8", errors="replace"))
                     if resp.get("id") == req_id:
                         if not resp.get("success", False):
                             self._raise_structured_error(resp, params)

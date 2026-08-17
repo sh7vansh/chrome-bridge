@@ -9,6 +9,18 @@ import sys
 import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+# Ensure UTF-8 streams cross-platform (especially on Windows)
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from chrome_sdk import ChromeBridgeError
 
 
@@ -278,3 +290,35 @@ class PythonReplSession:
             return f"Traceback (most recent call last):\n{formatted_tb}{exc_only}"
 
         return "".join(traceback.format_exception_only(type(exc), exc))
+
+
+def main():
+    """CLI entrypoint to execute Python code in the persistent session."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Chrome Bridge Python REPL Runner")
+    parser.add_argument("-c", "--code", type=str, help="Python code string to execute")
+    parser.add_argument("file", nargs="?", type=str, help="Python script file to execute")
+    args = parser.parse_args()
+
+    session = PythonReplSession()
+    if args.code:
+        out = session.execute(args.code)
+        print(out)
+    elif args.file:
+        with open(args.file, "r", encoding="utf-8", errors="replace") as f:
+            code = f.read()
+        out = session.execute(code)
+        print(out)
+    else:
+        if not sys.stdin.isatty():
+            code = sys.stdin.read()
+            if code.strip():
+                print(session.execute(code))
+        else:
+            parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
+

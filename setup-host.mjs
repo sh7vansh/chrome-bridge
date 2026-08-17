@@ -320,7 +320,7 @@ let hostExecutablePath = HOST_SCRIPT;
 
 if (isWindows) {
   const batPath = join(INSTALL_DIR, 'native-host.bat');
-  const batContent = `@echo off\r\nnode "${HOST_SCRIPT}" %*\r\n`;
+  const batContent = `@echo off\r\nsetlocal\r\nchcp 65001 >nul 2>&1\r\nset PYTHONIOENCODING=utf-8\r\nset PYTHONUTF8=1\r\nnode "${HOST_SCRIPT}" %*\r\n`;
   try {
     writeFileSync(batPath, batContent);
     console.log(`  ${c.green}✓${c.reset} Generated Windows Host Batch Wrapper: ${batPath}`);
