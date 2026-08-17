@@ -60,8 +60,19 @@ function resolvePython() {
     console.warn('');
   }
 
-  // Fallback to system python
-  return isWindows ? 'python.exe' : 'python3';
+  // Fallback to system python with version verification
+  const fallbackCmd = isWindows ? 'python.exe' : 'python3';
+  try {
+    const versionOutput = execSync(`"${fallbackCmd}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"`, { encoding: 'utf8' }).trim();
+    const [major, minor] = versionOutput.split('.').map(Number);
+    if (major > 3 || (major === 3 && minor >= 10)) {
+      return fallbackCmd;
+    }
+    console.warn(`⚠️ System ${fallbackCmd} version (${versionOutput}) is below required 3.10+`);
+  } catch (err) {
+    console.warn(`⚠️ Could not verify version of ${fallbackCmd}:`, err.message);
+  }
+  return fallbackCmd;
 }
 
 const PYTHON_CMD = resolvePython();
@@ -142,13 +153,9 @@ if (isWindows) {
 }
 
 // 3. Install Agent Skill into ~/.agent/skills and ~/.gemini/...
-const possibleSkillSources = [
-  join(__dirname, '.agents', 'skills', 'chrome-bridge', 'SKILL.md'),
-  join(__dirname, 'skills', 'chrome-bridge', 'SKILL.md')
-];
-const skillSource = possibleSkillSources.find(p => existsSync(p));
+const skillSource = join(__dirname, '.agents', 'skills', 'chrome-bridge', 'SKILL.md');
 
-if (skillSource) {
+if (existsSync(skillSource)) {
   const destDirs = [
     join(homedir(), '.agent', 'skills', 'chrome-bridge'),
     join(homedir(), '.gemini', 'antigravity-cli', 'skills', 'chrome-bridge')

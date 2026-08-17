@@ -15,7 +15,7 @@ async function updateBadge(status) {
   }
 }
 
-async function logActivity(message, type = 'info') {
+async function logActivity(message, type = 'info', details = null) {
   const { activityLogs = [] } = await chrome.storage.local.get('activityLogs');
   const now = new Date();
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -23,9 +23,10 @@ async function logActivity(message, type = 'info') {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     timestamp: timeStr,
     message,
-    type
+    type,
+    details: details ? (typeof details === 'object' ? JSON.stringify(details, null, 2) : String(details)) : null
   };
-  const updatedLogs = [newLog, ...activityLogs].slice(0, 60);
+  const updatedLogs = [newLog, ...activityLogs].slice(0, 80);
   await chrome.storage.local.set({ activityLogs: updatedLogs });
 }
 
@@ -90,7 +91,7 @@ function connectNative() {
       logType = 'scroll';
     }
 
-    await logActivity(logMsg, logType);
+    await logActivity(logMsg, logType, params);
 
     try {
       const result = await handleAction(action, params);
@@ -99,6 +100,7 @@ function connectNative() {
       }
     } catch (err) {
       console.error(`[NativeBridge] Action ${action} failed:`, err);
+      await logActivity(`Failed ${action}: ${err.message}`, 'error', err.structuredError || err.message);
       if (id && nativePort) {
         nativePort.postMessage({ id, success: false, error: err.structuredError || err.message });
       }
@@ -680,6 +682,53 @@ function inPageDOMOperation(payload) {
       return { matched: regex.test(window.location.href), currentUrl: window.location.href };
     }
 
+    case 'highlight_refs': {
+      const existing = document.getElementById('__ag_ref_overlay__');
+      if (existing) {
+        existing.remove();
+        return { active: false };
+      }
+      if (!window.__AG_REGISTRY__?.refMap || window.__AG_REGISTRY__.refMap.size === 0) {
+        generateSnapshot();
+      }
+      const refMap = window.__AG_REGISTRY__?.refMap || new Map();
+      const overlay = document.createElement('div');
+      overlay.id = '__ag_ref_overlay__';
+      overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font-family:ui-monospace,SFMono-Regular,monospace;';
+
+      let visibleCount = 0;
+      for (const [refId, el] of refMap.entries()) {
+        if (!el || !el.isConnected) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth) {
+          visibleCount++;
+          const badge = document.createElement('div');
+          badge.style.cssText = `position:fixed;left:${Math.max(2, rect.left)}px;top:${Math.max(2, rect.top - 18)}px;background:#0ea5e9;color:#041e3a;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;border:1px solid #38bdf8;box-shadow:0 2px 6px rgba(0,0,0,0.5);pointer-events:none;z-index:2147483647;line-height:1.2;`;
+          badge.textContent = `#${refId}`;
+
+          const box = document.createElement('div');
+          box.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;border:1.5px dashed #0ea5e9;background:rgba(14,165,233,0.08);border-radius:3px;pointer-events:none;z-index:2147483646;box-sizing:border-box;`;
+
+          overlay.appendChild(box);
+          overlay.appendChild(badge);
+        }
+      }
+      document.documentElement.appendChild(overlay);
+      setTimeout(() => {
+        const el = document.getElementById('__ag_ref_overlay__');
+        if (el) el.remove();
+      }, 10000);
+      return { active: true, count: visibleCount, total: refMap.size };
+    }
+
+    case 'get_metrics': {
+      const readyState = document.readyState;
+      const refCount = window.__AG_REGISTRY__?.totalInteractive || (window.__AG_REGISTRY__?.refMap?.size || 0);
+      const viewport = `${window.innerWidth} × ${window.innerHeight}`;
+      const totalElements = document.querySelectorAll('*').length;
+      return { readyState, refCount, viewport, totalElements, url: window.location.href, title: document.title };
+    }
+
     default:
       return { __error: { message: `Unknown inPage operation: ${operation}` } };
   }
@@ -888,12 +937,30 @@ async function handleAction(action, params) {
         } catch {}
         await new Promise(r => setTimeout(r, 200));
       }
+
+      let readyState = 'unknown';
+      let domState = 'unknown';
+      let url = '';
+      try {
+        const tab = await chrome.tabs.get(targetId);
+        url = tab.url || '';
+      } catch {}
+      try {
+        const intro = await executeInPage(targetId, 'introspect_timeout', { target: params.pattern });
+        readyState = intro.readyState || readyState;
+        domState = intro.domState || domState;
+        url = intro.url || url;
+      } catch {}
+
       const err = new Error(`Timed out waiting for URL pattern`);
       err.structuredError = {
         code: 'TIMEOUT',
         target: params.pattern,
         timeout,
-        tabId: targetId
+        tabId: targetId,
+        url,
+        readyState,
+        domState
       };
       throw err;
     }
@@ -972,9 +1039,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
         }
       } catch {}
-      sendResponse({ isConnected, activityLogs, activeTab: activeTabInfo, transport: 'Native Messaging' });
+      sendResponse({
+        isConnected,
+        activityLogs,
+        activeTab: activeTabInfo,
+        transport: 'Native Messaging (com.antigravity.chrome_bridge)',
+        hostName: HOST_NAME
+      });
     })();
     return true;
+  } else if (message.type === 'HIGHLIGHT_REFS') {
+    (async () => {
+      try {
+        const tabId = await resolveTabId(message.tabId);
+        const result = await executeInPage(tabId, 'highlight_refs');
+        sendResponse({ success: true, ...result });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (message.type === 'GET_PAGE_METRICS') {
+    (async () => {
+      try {
+        const tabId = await resolveTabId(message.tabId);
+        const result = await executeInPage(tabId, 'get_metrics');
+        sendResponse({ success: true, metrics: result });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (message.type === 'CAPTURE_SNAPSHOT') {
+    (async () => {
+      try {
+        const tabId = await resolveTabId(message.tabId);
+        const result = await executeInPage(tabId, 'snapshot');
+        sendResponse({ success: true, snapshot: result.snapshot, totalInteractive: result.totalInteractive });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (message.type === 'PING') {
+    sendResponse({ pong: true, timestamp: Date.now() });
+    return false;
   }
 });
 

@@ -50,6 +50,11 @@ _Avoid_: Blocking element, overlay blocker, click blocker
 The domain state when the browser session is closed, unreachable, or disconnected, signaled to the Driver via `BrowserUnavailableError`.
 _Avoid_: Socket error, host down, extension dead
 
+**Ref-ID Visual Highlighter**:
+A client-side overlay utility that renders transient bounding badges over indexed interactive DOM nodes on the active web page to visually verify locator mapping.
+_Avoid_: Element marker, bounding box injector, visual debugger
+
+
 ## Abstraction Seam Guarantees
 
 1. **Zero Information Leakage**: The Driver interface (`execute_python`) and all associated error exceptions must never expose internal transport mechanics, socket paths, Native Messaging hosts, or Manifest V3 background workers.

@@ -3,57 +3,90 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Antigravity Bridge</title>
+  <title>Antigravity Chrome Bridge</title>
   <style>
     :root {
       --bg-canvas: #090d16;
-      --bg-surface: #111726;
-      --bg-surface-hover: #172033;
-      --bg-inset: #0b111e;
+      --bg-surface: #0f172a;
+      --bg-surface-elevated: #1e293b;
+      --bg-surface-hover: #1e293b;
+      --bg-inset: #070b12;
+      
       --border-subtle: rgba(255, 255, 255, 0.08);
-      --border-strong: rgba(255, 255, 255, 0.16);
+      --border-medium: rgba(255, 255, 255, 0.14);
+      --border-focus: #38bdf8;
       
       --text-primary: #f8fafc;
       --text-secondary: #94a3b8;
       --text-tertiary: #64748b;
       
-      --brand-primary: #3b82f6;
-      --brand-primary-hover: #2563eb;
+      --accent-cyan: #0ea5e9;
+      --accent-cyan-glow: rgba(14, 165, 233, 0.25);
+      --accent-indigo: #6366f1;
+      --accent-indigo-glow: rgba(99, 102, 241, 0.25);
       
       --status-online-bg: rgba(16, 185, 129, 0.12);
-      --status-online-border: rgba(16, 185, 129, 0.3);
+      --status-online-border: rgba(16, 185, 129, 0.35);
       --status-online-text: #34d399;
+      --status-online-glow: rgba(52, 211, 153, 0.4);
       
-      --status-offline-bg: rgba(100, 116, 139, 0.12);
-      --status-offline-border: rgba(100, 116, 139, 0.3);
-      --status-offline-text: #94a3b8;
-
       --status-warn-bg: rgba(245, 158, 11, 0.12);
-      --status-warn-border: rgba(245, 158, 11, 0.3);
+      --status-warn-border: rgba(245, 158, 11, 0.35);
       --status-warn-text: #fbbf24;
+
+      --status-offline-bg: rgba(100, 116, 139, 0.12);
+      --status-offline-border: rgba(100, 116, 139, 0.25);
+      --status-offline-text: #94a3b8;
       
+      --radius-xs: 4px;
       --radius-sm: 6px;
       --radius-md: 10px;
       --radius-lg: 14px;
       --radius-full: 9999px;
+      
+      --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      font-family: var(--font-sans);
       -webkit-font-smoothing: antialiased;
     }
 
     body {
-      width: 360px;
-      background: var(--bg-canvas);
+      width: 380px;
+      min-height: 520px;
+      max-height: 540px;
+      background: radial-gradient(circle at 85% 15%, rgba(14, 165, 233, 0.08) 0%, transparent 60%),
+                  radial-gradient(circle at 15% 85%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+                  var(--bg-canvas);
       color: var(--text-primary);
       padding: 14px;
       font-size: 13px;
       line-height: 1.4;
       overflow-x: hidden;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
     }
 
     /* Header */
@@ -61,38 +94,37 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 12px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 10px;
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 9px;
     }
 
     .brand-icon {
-      width: 26px;
-      height: 26px;
+      width: 28px;
+      height: 28px;
       border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, #3b82f6, #6366f1);
-      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      box-shadow: 0 2px 10px rgba(14, 165, 233, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
     .brand-icon svg {
-      width: 15px;
-      height: 15px;
+      width: 16px;
+      height: 16px;
       fill: white;
     }
 
     .brand-title {
       font-size: 14px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
+      font-weight: 700;
+      letter-spacing: -0.02em;
       color: var(--text-primary);
       display: flex;
       align-items: center;
@@ -100,12 +132,14 @@
     }
 
     .version-chip {
-      font-size: 10px;
-      font-weight: 500;
-      color: var(--text-tertiary);
-      background: rgba(255, 255, 255, 0.06);
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--accent-cyan);
+      background: rgba(14, 165, 233, 0.12);
+      border: 1px solid rgba(14, 165, 233, 0.25);
       padding: 1px 5px;
       border-radius: 4px;
+      font-family: var(--font-mono);
     }
 
     /* Status Pill */
@@ -120,13 +154,14 @@
       background: var(--status-offline-bg);
       border: 1px solid var(--status-offline-border);
       color: var(--status-offline-text);
-      transition: all 0.2s ease;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .status-pill.connected {
       background: var(--status-online-bg);
       border-color: var(--status-online-border);
       color: var(--status-online-text);
+      box-shadow: 0 0 12px var(--status-online-glow);
     }
 
     .status-pill.connecting {
@@ -149,37 +184,50 @@
       inset: -3px;
       border-radius: 50%;
       background: currentColor;
-      opacity: 0.4;
-      animation: pulse 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+      opacity: 0.5;
+      animation: pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
     }
 
     @keyframes pulse {
-      0%, 100% { transform: scale(1); opacity: 0.4; }
-      50% { transform: scale(1.8); opacity: 0; }
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(2); opacity: 0; }
     }
 
-    /* Active Tab Card */
+    /* Active Tab Preview Card */
     .active-tab-card {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      padding: 10px 12px;
-      margin-bottom: 12px;
+      padding: 9px 12px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       gap: 10px;
-      transition: border-color 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .active-tab-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 3px;
+      background: linear-gradient(180deg, var(--accent-cyan), var(--accent-indigo));
     }
 
     .tab-favicon {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
       background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
     }
 
     .tab-favicon img {
@@ -198,12 +246,12 @@
       align-items: center;
       justify-content: space-between;
       gap: 6px;
-      margin-bottom: 2px;
+      margin-bottom: 1px;
     }
 
     .tab-title {
       font-size: 12px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
@@ -212,10 +260,11 @@
 
     .tab-id-badge {
       font-size: 10px;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      color: var(--text-tertiary);
-      background: rgba(255, 255, 255, 0.04);
-      padding: 1px 4px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 1px 5px;
       border-radius: 4px;
       flex-shrink: 0;
     }
@@ -228,14 +277,14 @@
       text-overflow: ellipsis;
     }
 
-    /* Segmented Navigation Tabs */
+    /* Segmented Navigation */
     .tabs-nav {
       display: flex;
       background: var(--bg-inset);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
-      padding: 2px;
-      margin-bottom: 12px;
+      padding: 3px;
+      margin-bottom: 10px;
       gap: 2px;
     }
 
@@ -244,139 +293,199 @@
       background: transparent;
       border: none;
       color: var(--text-secondary);
-      padding: 6px 10px;
+      padding: 6px 8px;
       font-size: 11px;
-      font-weight: 500;
-      border-radius: 4px;
+      font-weight: 600;
+      border-radius: var(--radius-xs);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 5px;
       transition: all 0.15s ease;
     }
 
     .nav-btn:hover {
       color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
     }
 
     .nav-btn.active {
-      background: var(--bg-surface);
+      background: var(--bg-surface-elevated);
       color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border-subtle);
     }
 
     .count-badge {
-      font-size: 10px;
+      font-size: 9px;
+      font-family: var(--font-mono);
       background: rgba(255, 255, 255, 0.1);
-      padding: 1px 5px;
-      border-radius: 10px;
+      padding: 0 5px;
+      border-radius: 8px;
+      font-weight: 700;
     }
 
-    /* Section Panels */
+    /* Panel views */
     .section-panel {
       display: none;
+      flex: 1;
     }
 
     .section-panel.active {
-      display: block;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
     }
 
-    /* Activity Stream */
-    .stream-header {
+    /* Activity Stream View */
+    .stream-toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 8px;
+      gap: 6px;
     }
 
-    .section-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: var(--text-tertiary);
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .filter-chip {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 3px 7px;
+      border-radius: var(--radius-full);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .filter-chip:hover {
+      color: var(--text-primary);
+      border-color: var(--border-medium);
+    }
+
+    .filter-chip.active {
+      background: rgba(14, 165, 233, 0.15);
+      border-color: var(--accent-cyan);
+      color: #38bdf8;
       font-weight: 600;
     }
 
-    .btn-ghost {
+    .btn-ghost-sm {
       background: transparent;
       border: none;
       color: var(--text-tertiary);
       font-size: 11px;
       cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 4px;
-      transition: color 0.15s;
+      padding: 3px 6px;
+      border-radius: var(--radius-xs);
+      transition: all 0.15s;
     }
 
-    .btn-ghost:hover {
+    .btn-ghost-sm:hover {
       color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.06);
     }
 
     .stream-container {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      height: 180px;
+      height: 310px;
       overflow-y: auto;
       padding: 6px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
     }
 
     .stream-item {
       display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 6px 8px;
+      flex-direction: column;
+      padding: 7px 9px;
       border-radius: var(--radius-sm);
       background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
       font-size: 11px;
-      border-left: 2px solid transparent;
-      transition: background 0.15s;
+      cursor: pointer;
+      transition: all 0.15s;
     }
 
     .stream-item:hover {
       background: rgba(255, 255, 255, 0.05);
+      border-color: var(--border-subtle);
+    }
+
+    .stream-row-main {
+      display: flex;
+      align-items: center;
+      gap: 7px;
     }
 
     .tag-badge {
       font-size: 9px;
       font-weight: 700;
-      padding: 1px 5px;
-      border-radius: 3px;
+      padding: 2px 5px;
+      border-radius: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.03em;
+      font-family: var(--font-mono);
       flex-shrink: 0;
     }
 
-    .tag-nav { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-    .tag-click { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-    .tag-type { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
-    .tag-screenshot { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-    .tag-content { background: rgba(14, 165, 233, 0.2); color: #38bdf8; }
-    .tag-eval { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
-    .tag-tabs { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
-    .tag-scroll { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
-    .tag-success { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-    .tag-error { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-    .tag-cmd { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+    .tag-nav { background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); }
+    .tag-click { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .tag-type { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+    .tag-screenshot { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .tag-content { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .tag-eval { background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
+    .tag-tabs { background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }
+    .tag-scroll { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .tag-success { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .tag-error { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .tag-cmd { background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }
 
     .stream-content {
       flex: 1;
       min-width: 0;
       color: var(--text-primary);
-      word-break: break-word;
-      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
     }
 
     .stream-time {
       font-size: 10px;
       color: var(--text-tertiary);
-      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-family: var(--font-mono);
       flex-shrink: 0;
+    }
+
+    .stream-payload-box {
+      display: none;
+      margin-top: 6px;
+      padding: 6px;
+      background: var(--bg-inset);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: #93c5fd;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .stream-item.expanded .stream-payload-box {
+      display: block;
     }
 
     .empty-state {
@@ -387,28 +496,148 @@
       height: 100%;
       color: var(--text-tertiary);
       text-align: center;
-      padding: 16px;
-      gap: 6px;
+      padding: 20px;
+      gap: 8px;
     }
 
     .empty-state svg {
-      width: 28px;
-      height: 28px;
-      opacity: 0.5;
+      width: 32px;
+      height: 32px;
+      opacity: 0.4;
+      stroke: var(--text-secondary);
     }
 
     .empty-state-title {
       font-size: 12px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-secondary);
     }
 
     .empty-state-sub {
       font-size: 11px;
-      line-height: 1.3;
+      line-height: 1.4;
+      color: var(--text-tertiary);
     }
 
-    /* Settings Panel */
+    /* Inspector View */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+    }
+
+    .metric-val {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      font-family: var(--font-mono);
+    }
+
+    .tools-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .tools-header {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+      margin-bottom: 2px;
+    }
+
+    .btn-action-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-action {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-action:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-medium);
+    }
+
+    .btn-action.active-tool {
+      background: rgba(14, 165, 233, 0.2);
+      border-color: var(--accent-cyan);
+      color: #38bdf8;
+    }
+
+    .snapshot-preview-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .snapshot-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .snapshot-box {
+      background: var(--bg-inset);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs);
+      padding: 8px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: #cbd5e1;
+      height: 110px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.35;
+    }
+
+    /* Bridge & Config View */
     .card-box {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
@@ -417,91 +646,95 @@
       margin-bottom: 10px;
     }
 
-    .input-row {
+    .card-box-header {
       display: flex;
-      gap: 8px;
-      margin-top: 6px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
     }
 
-    input[type="text"] {
-      flex: 1;
-      background: var(--bg-inset);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-primary);
-      padding: 7px 10px;
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      outline: none;
-      transition: border-color 0.15s;
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
     }
 
-    input[type="text"]:focus {
-      border-color: var(--brand-primary);
+    .badge-latency {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--status-online-text);
+      background: var(--status-online-bg);
+      border: 1px solid var(--status-online-border);
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
     }
 
-    .btn-primary {
-      background: var(--brand-primary);
-      color: white;
-      border: none;
-      padding: 7px 12px;
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s;
+    .info-subtext {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
+      margin-bottom: 10px;
     }
 
-    .btn-primary:hover {
-      background: var(--brand-primary-hover);
-    }
-
-    .btn-block {
+    .btn-block-action {
       width: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
-      background: var(--bg-surface-hover);
+      gap: 7px;
+      background: var(--bg-surface-elevated);
       border: 1px solid var(--border-subtle);
       color: var(--text-primary);
       padding: 8px 12px;
       border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 11px;
+      font-weight: 600;
       cursor: pointer;
       transition: all 0.15s ease;
     }
 
-    .btn-block:hover {
+    .btn-block-action:hover {
       background: rgba(255, 255, 255, 0.08);
-      border-color: var(--border-strong);
+      border-color: var(--border-medium);
     }
 
-    .mcp-info-note {
+    .code-preview-snippet {
+      background: var(--bg-inset);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs);
+      padding: 8px 10px;
+      font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--text-secondary);
-      line-height: 1.4;
-      margin-top: 8px;
+      color: #93c5fd;
+      margin-bottom: 8px;
+      overflow-x: auto;
+      white-space: nowrap;
     }
 
     /* Toast Notification */
     .toast {
       position: fixed;
-      bottom: 12px;
+      bottom: 14px;
       left: 50%;
-      transform: translateX(-50%) translateY(40px);
-      background: #10b981;
-      color: #042f1a;
+      transform: translateX(-50%) translateY(50px);
+      background: #0284c7;
+      color: white;
       font-size: 11px;
       font-weight: 600;
       padding: 6px 14px;
       border-radius: var(--radius-full);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       opacity: 0;
       transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
       pointer-events: none;
       z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .toast.show {
@@ -522,7 +755,7 @@
       </div>
       <div class="brand-title">
         <span>Antigravity</span>
-        <span class="version-chip">v1.0</span>
+        <span class="version-chip">v2.0</span>
       </div>
     </div>
     <div id="statusPill" class="status-pill">
@@ -542,29 +775,37 @@
     </div>
     <div class="tab-details">
       <div class="tab-title-row">
-        <span class="tab-title" id="activeTabTitle">Loading active tab...</span>
+        <span class="tab-title" id="activeTabTitle">Connecting active tab...</span>
         <span class="tab-id-badge" id="activeTabId">-</span>
       </div>
       <div class="tab-url" id="activeTabUrl">...</div>
     </div>
   </div>
 
-  <!-- Segmented Nav -->
+  <!-- Segmented Navigation -->
   <div class="tabs-nav">
     <button class="nav-btn active" id="tabStreamBtn">
-      <span>Activity Feed</span>
+      <span>Telemetry</span>
       <span class="count-badge" id="logCountBadge">0</span>
     </button>
-    <button class="nav-btn" id="tabSettingsBtn">
-      <span>MCP & Config</span>
+    <button class="nav-btn" id="tabInspectorBtn">
+      <span>DOM & Refs</span>
+    </button>
+    <button class="nav-btn" id="tabBridgeBtn">
+      <span>Bridge & Setup</span>
     </button>
   </div>
 
-  <!-- View 1: Activity Stream -->
+  <!-- View 1: Telemetry Stream -->
   <div class="section-panel active" id="panelStream">
-    <div class="stream-header">
-      <span class="section-label">Live Telemetry</span>
-      <button class="btn-ghost" id="clearStreamBtn">Clear Feed</button>
+    <div class="stream-toolbar">
+      <div class="filter-group">
+        <span class="filter-chip active" data-filter="all">All</span>
+        <span class="filter-chip" data-filter="actions">Actions</span>
+        <span class="filter-chip" data-filter="dom">DOM</span>
+        <span class="filter-chip" data-filter="errors">Errors</span>
+      </div>
+      <button class="btn-ghost-sm" id="clearStreamBtn">Clear Feed</button>
     </div>
     <div class="stream-container" id="streamList">
       <div class="empty-state">
@@ -573,48 +814,113 @@
           <line x1="8" y1="21" x2="16" y2="21"></line>
           <line x1="12" y1="17" x2="12" y2="21"></line>
         </svg>
-        <div class="empty-state-title">Waiting for AI agent actions</div>
-        <div class="empty-state-sub">Browser events will appear here in real-time.</div>
+        <div class="empty-state-title">Waiting for AI Driver Actions</div>
+        <div class="empty-state-sub">Procedural Python commands and DOM queries will appear here in real-time.</div>
       </div>
     </div>
   </div>
 
-  <!-- View 2: MCP & Config -->
-  <div class="section-panel" id="panelSettings">
-    <div class="card-box">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <span class="section-label">Native Messaging Bridge</span>
-        <span style="font-size: 10px; color: #34d399; font-weight: 600;">Active stdio IPC</span>
+  <!-- View 2: DOM & Page Inspector -->
+  <div class="section-panel" id="panelInspector">
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Active Ref-IDs</span>
+        <span class="metric-val" id="metricRefCount">0</span>
       </div>
-      <p class="mcp-info-note" style="margin-top: 0; margin-bottom: 8px;">
-        Direct communication via Chrome Native Messaging. Zero network ports, zero daemons, zero connection errors.
+      <div class="metric-card">
+        <span class="metric-label">Ready State</span>
+        <span class="metric-val" id="metricReadyState" style="font-size: 13px;">-</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Viewport</span>
+        <span class="metric-val" id="metricViewport" style="font-size: 12px;">-</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Total DOM Nodes</span>
+        <span class="metric-val" id="metricNodeCount">0</span>
+      </div>
+    </div>
+
+    <div class="tools-card">
+      <span class="tools-header">Interactive Page Utilities</span>
+      <div class="btn-action-row">
+        <button class="btn-action" id="highlightRefsBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          <span>Highlight Ref-IDs</span>
+        </button>
+        <button class="btn-action" id="copySnapshotBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+          <span>Copy Snapshot</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="snapshot-preview-card">
+      <div class="snapshot-preview-header">
+        <span class="tools-header">Semantic DOM Preview</span>
+        <button class="btn-ghost-sm" id="refreshSnapshotBtn">Refresh</button>
+      </div>
+      <div class="snapshot-box" id="snapshotPreviewBox">Generating snapshot...</div>
+    </div>
+  </div>
+
+  <!-- View 3: Bridge & Setup -->
+  <div class="section-panel" id="panelBridge">
+    <div class="card-box">
+      <div class="card-box-header">
+        <span class="card-title">Native Messaging Transport</span>
+        <span class="badge-latency" id="bridgeLatency">⚡ 1.2ms</span>
+      </div>
+      <p class="info-subtext">
+        Zero network ports or external daemons. The Python REPL connects directly via native OS stdio pipes.
       </p>
-      <button class="btn-block" id="reconnectNativeBtn">
+      <button class="btn-block-action" id="reconnectNativeBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M23 4v6h-6"></path>
           <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
         </svg>
-        <span>Reconnect Bridge</span>
+        <span>Reconnect Bridge Host</span>
       </button>
     </div>
 
     <div class="card-box">
-      <span class="section-label">Share with Claude / Cursor / Antigravity</span>
-      <p class="mcp-info-note" style="margin-bottom: 8px;">
-        Add this MCP configuration to connect any AI client to your live browser:
-      </p>
-      <button class="btn-block" id="copyMcpBtn">
+      <span class="card-title" style="margin-bottom: 6px; display: block;">Python REPL Driver Snippet</span>
+      <div class="code-preview-snippet">from chrome_sdk import chrome</div>
+      <button class="btn-block-action" id="copyPythonSnippetBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </svg>
-        <span>Copy MCP Server Config</span>
+        <span>Copy Python Code</span>
+      </button>
+    </div>
+
+    <div class="card-box">
+      <span class="card-title" style="margin-bottom: 6px; display: block;">MCP Server Integration</span>
+      <p class="info-subtext">Connect Cursor, Claude Desktop, or Antigravity via stdio:</p>
+      <button class="btn-block-action" id="copyMcpBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy MCP JSON Config</span>
       </button>
     </div>
   </div>
 
   <!-- Toast Notification -->
-  <div id="toast" class="toast">Copied to clipboard!</div>
+  <div id="toast" class="toast">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+    <span id="toastMsg">Copied to clipboard!</span>
+  </div>
 
   <script src="popup.js"></script>
 </body>

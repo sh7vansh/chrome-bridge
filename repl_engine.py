@@ -85,6 +85,12 @@ class OutputBudgetFormatter:
         omitted_tokens = max(1, omitted_chars // 4)
         return f"{head}\n... [{omitted_chars:,} chars / {omitted_tokens:,} tokens omitted] ...\n{tail}"
 
+    @staticmethod
+    def _format_multiline_block(item_strs: List[str], current_depth: int) -> str:
+        indent = "  " * (current_depth + 1)
+        close_indent = "  " * current_depth
+        return f"\n{indent}" + f",\n{indent}".join(item_strs) + f"\n{close_indent}"
+
     def _serialize_value(
         self, val: Any, current_depth: int = 0, budget: int = 2000
     ) -> str:
@@ -129,9 +135,7 @@ class OutputBudgetFormatter:
             # Formatted multiline if nested or long
             inner = ", ".join(item_strs)
             if len(inner) > 80 or any("\n" in s for s in item_strs):
-                indent = "  " * (current_depth + 1)
-                close_indent = "  " * current_depth
-                inner = f"\n{indent}" + f",\n{indent}".join(item_strs) + f"\n{close_indent}"
+                inner = self._format_multiline_block(item_strs, current_depth)
             return f"{open_bracket}{inner}{close_bracket}"
 
         # Dictionaries
@@ -150,9 +154,7 @@ class OutputBudgetFormatter:
                 omitted = len(keys) - self.max_items
                 item_strs.append(f"... ({omitted} more keys)")
             
-            indent = "  " * (current_depth + 1)
-            close_indent = "  " * current_depth
-            inner = f"\n{indent}" + f",\n{indent}".join(item_strs) + f"\n{close_indent}"
+            inner = self._format_multiline_block(item_strs, current_depth)
             return f"{{{inner}}}"
 
         # Custom repr for objects

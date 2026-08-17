@@ -43,6 +43,16 @@ class BrowserUnavailableError(ChromeBridgeError):
         super().__init__(message, tab_id)
 
 
+def _format_ref_id(ref: Union[str, int]) -> str:
+    """Format a Ref-ID into canonical [#X] representation."""
+    r_str = str(ref).strip()
+    if not r_str.startswith("#") and not r_str.startswith("[#"):
+        r_str = f"#{r_str}"
+    if not r_str.startswith("["):
+        r_str = f"[{r_str}]"
+    return r_str
+
+
 class ElementNotFoundError(ChromeBridgeError):
     """Raised when a Ref-ID or CSS selector cannot be located."""
 
@@ -62,11 +72,7 @@ class ElementNotFoundError(ChromeBridgeError):
         if suggestions:
             sug_list = []
             for s in suggestions:
-                ref = s.get("ref", "")
-                if isinstance(ref, int) or (isinstance(ref, str) and not ref.startswith("[#") and not ref.startswith("#")):
-                    ref = f"#{ref}"
-                if isinstance(ref, str) and not ref.startswith("["):
-                    ref = f"[{ref}]"
+                ref = _format_ref_id(s.get("ref", ""))
                 role = s.get("role", "element")
                 name = s.get("name", "")
                 sug_list.append(f"{ref} ({role} '{name}')")
@@ -90,14 +96,7 @@ class ActionInterceptionError(ChromeBridgeError):
         interceptor_desc: str = "",
         tab_id: Optional[int] = None,
     ):
-        ref_formatted = ""
-        if interceptor_ref is not None:
-            r_str = str(interceptor_ref).strip()
-            if not r_str.startswith("#") and not r_str.startswith("[#"):
-                r_str = f"#{r_str}"
-            if not r_str.startswith("["):
-                r_str = f"[{r_str}]"
-            ref_formatted = r_str
+        ref_formatted = _format_ref_id(interceptor_ref) if interceptor_ref is not None else ""
 
         interceptor_label = (
             f"{ref_formatted} ({interceptor_desc})"

@@ -47,6 +47,20 @@ def test_navigation_timeout_error_introspection():
     assert "hidden in DOM (display: none)" in str(err)
 
 
+def test_url_timeout_error_introspection():
+    err = NavigationTimeoutError(
+        target="https://example.com/dashboard*",
+        timeout=15.0,
+        url="https://example.com/login",
+        ready_state="interactive",
+        dom_state="unknown",
+        tab_id=2
+    )
+    assert "Timed out after 15.0s waiting for 'https://example.com/dashboard*'" in str(err)
+    assert "Current URL: https://example.com/login" in str(err)
+    assert "readyState: 'interactive'" in str(err)
+
+
 def test_repl_auto_injects_diagnostic_snapshot_on_error():
     session = PythonReplSession()
     code = """
