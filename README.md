@@ -20,7 +20,7 @@ Unlike Puppeteer or Playwright which launch isolated, empty browser instances, C
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Agent as AI Agent (Claude / Cursor / Antigravity)
+    actor Agent as AI Agent (Claude Code / Cursor / Claude Desktop / Antigravity)
     participant REPL as Python Runtime (chrome_sdk)
     participant Host as Native Host (stdio IPC)
     participant Ext as Chrome MV3 Extension
@@ -40,7 +40,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph ClientLayer ["AI & Client Runtime"]
-        A["AI Agent<br/>(Claude / Cursor / Antigravity)"]
+        A["AI Agent<br/>(Claude Code / Cursor / Claude Desktop / Antigravity)"]
         B["Python REPL Runtime<br/>(chrome_sdk)"]
         A -->|"execute_python(code)"| B
     end
@@ -71,7 +71,7 @@ npx antigravity-chrome-bridge setup
 This single command automatically:
 - Provisions the isolated Python runtime (`~/.chrome-bridge`).
 - Registers the Native Messaging Host for Chrome, Brave, and Edge.
-- Automatically configures MCP servers for **Claude Desktop**, **Cursor**, and **Antigravity CLI**.
+- Automatically configures MCP servers for **Claude Code**, **Claude Desktop**, **Cursor**, and **Antigravity CLI**.
 
 <details>
 <summary>Alternative: Install from source (for contributors)</summary>

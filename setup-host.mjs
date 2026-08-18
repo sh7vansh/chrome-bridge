@@ -8,7 +8,7 @@
  * 2. Python 3.11+ virtual environment & dependencies
  * 3. Chrome / Chromium / Brave / Edge Native Messaging Host
  * 4. Antigravity AI Agent Skills
- * 5. MCP Server configurations across Antigravity, Claude Desktop, and Cursor
+ * 5. MCP Server configurations across Claude Code, Antigravity, Claude Desktop, and Cursor
  */
 
 import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, cpSync, chmodSync, statSync } from 'node:fs';
@@ -160,6 +160,7 @@ if (command === 'status') {
 
   console.log(`\n${c.bold}🤖 MCP Client Configurations:${c.reset}`);
   const mcpConfigs = [
+    { name: 'Claude Code', path: join(homedir(), '.claude.json') },
     { name: 'Antigravity', path: join(homedir(), '.agent', 'mcp_config.json') },
     { name: 'Antigravity CLI', path: join(homedir(), '.gemini', 'antigravity-cli', 'mcp_config.json') },
     { name: 'Claude Desktop', path: join(homedir(), '.config', 'Claude', 'claude_desktop_config.json') },
@@ -517,10 +518,16 @@ function updateMcpConfig(filePath, clientName) {
     if (existsSync(filePath)) {
       try {
         const raw = readFileSync(filePath, 'utf8');
-        config = JSON.parse(raw) || { mcpServers: {} };
-        if (!config.mcpServers) config.mcpServers = {};
+        config = JSON.parse(raw) || {};
+        if (typeof config !== 'object' || Array.isArray(config)) {
+          config = { mcpServers: {} };
+        }
+        if (!config.mcpServers || typeof config.mcpServers !== 'object' || Array.isArray(config.mcpServers)) {
+          config.mcpServers = {};
+        }
       } catch {
-        config = { mcpServers: {} };
+        console.warn(`  ${c.yellow}⚠️ Could not parse JSON in ${filePath}, skipping...${c.reset}`);
+        return false;
       }
     } else {
       mkdirSync(dirname(filePath), { recursive: true });
@@ -539,6 +546,9 @@ function updateMcpConfig(filePath, clientName) {
     return false;
   }
 }
+
+// Update Claude Code MCP config (~/.claude.json)
+updateMcpConfig(join(homedir(), '.claude.json'), 'Claude Code');
 
 // Update Antigravity & Gemini CLI MCP configs
 updateMcpConfig(join(homedir(), '.agent', 'mcp_config.json'), 'Antigravity Global MCP');
@@ -587,7 +597,7 @@ ${c.bold}🚀 NEXT STEPS TO CONNECT YOUR BROWSER:${c.reset}
      It should show ${c.green}● Connected to Native Host${c.reset}.
 
   ${c.bold}3. Control Browser from your AI Assistant:${c.reset}
-     Your assistant can now procedurally automate your browser:
+     Your assistant (Claude Code, Cursor, Claude Desktop, Antigravity) can now procedurally automate your browser:
      ${c.dim}"Inspect open tabs and snapshot the active page"${c.reset}
 `);
 

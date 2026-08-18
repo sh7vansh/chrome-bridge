@@ -13,7 +13,7 @@ Chrome Bridge
 Connects your standard Google Chrome browser to AI coding assistants and Python runtime via Model Context Protocol (MCP).
 
 **Detailed Description**
-Chrome Bridge seamlessly connects your active Google Chrome browser to local AI coding assistants and agents (such as Claude Desktop, Cursor, and Antigravity) using the open Model Context Protocol (MCP).
+Chrome Bridge seamlessly connects your active Google Chrome browser to local AI coding assistants and agents (such as Claude Code, Claude Desktop, Cursor, and Antigravity) using the open Model Context Protocol (MCP).
 
 Key Capabilities:
 - Seamless Navigation: Automates navigation across web pages and tabs without opening isolated/debug browsers.

@@ -98,3 +98,113 @@ def test_skill_source_discovery_multi_root(tmp_path):
     assert res.returncode == 0
     assert "Resolved skill source" in res.stdout
 
+
+def test_setup_host_configures_claude_code_json(tmp_path):
+    """Test that setup automatically creates and configures ~/.claude.json for Claude Code."""
+    setup_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "setup-host.mjs"))
+    runtime_dir = tmp_path / "runtime"
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = subprocess.run(
+        ["node", setup_script, "setup", "--target", str(runtime_dir), "--quiet"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"setup-host failed: {res.stderr}\n{res.stdout}"
+
+    claude_json = home_dir / ".claude.json"
+    assert claude_json.exists(), "~/.claude.json was not created"
+    data = json.loads(claude_json.read_text())
+    assert "mcpServers" in data
+    assert "chrome-bridge" in data["mcpServers"]
+    assert data["mcpServers"]["chrome-bridge"]["args"][0].endswith("mcp_server.py")
+
+
+def test_setup_host_claude_code_non_destructive_merge(tmp_path):
+    """Test that setup preserves existing keys and other mcpServers in ~/.claude.json."""
+    setup_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "setup-host.mjs"))
+    runtime_dir = tmp_path / "runtime"
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    claude_json = home_dir / ".claude.json"
+    initial_data = {
+        "allowedTools": ["Bash", "GlobTool"],
+        "mcpServers": {
+            "existing-server": {
+                "command": "node",
+                "args": ["server.js"]
+            }
+        },
+        "customSetting": True
+    }
+    claude_json.write_text(json.dumps(initial_data, indent=2))
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = subprocess.run(
+        ["node", setup_script, "setup", "--target", str(runtime_dir), "--quiet"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"setup-host failed: {res.stderr}\n{res.stdout}"
+
+    updated = json.loads(claude_json.read_text())
+    assert updated["allowedTools"] == ["Bash", "GlobTool"]
+    assert updated["customSetting"] is True
+    assert "existing-server" in updated["mcpServers"]
+    assert "chrome-bridge" in updated["mcpServers"]
+
+
+def test_setup_host_claude_code_handles_malformed_json(tmp_path):
+    """Test that setup gracefully handles malformed ~/.claude.json without throwing or aborting."""
+    setup_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "setup-host.mjs"))
+    runtime_dir = tmp_path / "runtime"
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    claude_json = home_dir / ".claude.json"
+    claude_json.write_text("{ this is definitely not valid json")
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = subprocess.run(
+        ["node", setup_script, "setup", "--target", str(runtime_dir), "--quiet"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"setup-host should not abort on malformed JSON: {res.stderr}\n{res.stdout}"
+
+
+def test_setup_host_status_reports_claude_code(tmp_path):
+    """Test that status command reports Claude Code MCP configuration state."""
+    setup_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "setup-host.mjs"))
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = subprocess.run(
+        ["node", setup_script, "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "Claude Code" in res.stdout
+
+
