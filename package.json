@@ -1,6 +1,6 @@
 {
   "name": "antigravity-chrome-bridge",
-  "version": "2.0.14",
+  "version": "2.0.15",
   "description": "Chrome Bridge 2.0 - Persistent Python REPL Runtime & Chrome Extension for AI browser automation",
   "type": "module",
   "bin": {

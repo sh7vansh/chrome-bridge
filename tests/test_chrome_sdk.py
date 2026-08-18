@@ -64,6 +64,34 @@ def test_tab_type_action():
     )
 
 
+def test_tab_navigate_neutralizes_beforeunload_and_dispatches_navigation():
+    client = MagicMock()
+    client.call.side_effect = [
+        # eval_js execute_script call
+        {"result": None},
+        # navigate call
+        {"status": "ok", "url": "https://example.com/target", "tabId": 5},
+    ]
+
+    tab = Tab(tab_id=5, client=client)
+    res = tab.navigate("https://example.com/target")
+
+    assert tab.url == "https://example.com/target"
+    assert res["status"] == "ok"
+    assert client.call.call_count == 2
+    # Verify first call neutralizes beforeunload handlers via execute_script
+    first_call = client.call.call_args_list[0]
+    assert first_call[0][0] == "execute_script"
+    assert "onbeforeunload" in first_call[0][1]["code"]
+    assert "stopImmediatePropagation" in first_call[0][1]["code"]
+    assert first_call[0][1]["tabId"] == 5
+
+    # Verify second call is navigate
+    second_call = client.call.call_args_list[1]
+    assert second_call[0][0] == "navigate"
+    assert second_call[0][1] == {"url": "https://example.com/target", "tabId": 5}
+
+
 def test_chrome_singleton_dispatches_single_roundtrip_action():
     client = MagicMock()
     client.call.return_value = {"snapshot": 'PAGE: "Active Tab"\n- button [#1] "Submit"', "totalInteractive": 1}

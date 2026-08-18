@@ -567,7 +567,21 @@ class Tab:
         return self._client.call("close_tab", {"tabId": self.id})
 
     def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
-        """Navigate tab to a URL."""
+        """
+        Navigates the tab to the specified URL while neutralizing
+        any 'beforeunload' dialogs (e.g., Leave/Stay prompts).
+        """
+        try:
+            self.eval_js("""
+                window.onbeforeunload = null;
+                window.addEventListener('beforeunload', (e) => {
+                    e.stopImmediatePropagation();
+                }, true);
+            """)
+        except Exception:
+            # Ignore errors if page is not in a valid JS state or already unloading
+            pass
+
         res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
         self.url = res.get("url", url)
         return res
