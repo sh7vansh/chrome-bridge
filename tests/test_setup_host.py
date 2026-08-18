@@ -237,6 +237,16 @@ def test_setup_host_cleanup_removes_endpoints(tmp_path):
     # Create dummy socket/port in temp directory
     sock_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
     port_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
+    if os.path.exists(sock_path) or os.path.islink(sock_path):
+        try:
+            os.remove(sock_path)
+        except OSError:
+            pass
+    if os.path.exists(port_path):
+        try:
+            os.remove(port_path)
+        except OSError:
+            pass
     with open(sock_path, "w") as f:
         f.write("mock")
     with open(port_path, "w") as f:
@@ -247,6 +257,46 @@ def test_setup_host_cleanup_removes_endpoints(tmp_path):
     assert res.returncode == 0
     assert not os.path.exists(sock_path), "cleanup did not remove socket file"
     assert not os.path.exists(port_path), "cleanup did not remove port file"
+
+
+def test_setup_host_prints_extension_folder_and_instructions(tmp_path):
+    """Test that setup output prints the local unpacked extension folder path and instructions, not a webstore link."""
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+    target_dir = tmp_path / "runtime"
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = run_setup_host("setup", "--target", str(target_dir), "--no-listen", env=env)
+    assert res.returncode == 0
+    assert "chromewebstore.google.com" not in res.stdout
+    assert "Extension Path" in res.stdout
+    assert "EXTENSION INSTALLATION INSTRUCTIONS:" in res.stdout
+    assert "chrome://extensions/" in res.stdout
+    assert "Load unpacked" in res.stdout
+
+
+def test_resolve_extension_dir_prioritizes_install_then_source(tmp_path):
+    """Test that resolve_extension_dir resolves installed extension dir or falls back to source repo."""
+    from setup_host import resolve_extension_dir
+
+    install_dir = tmp_path / "install"
+    source_dir = tmp_path / "source"
+    install_dir.mkdir()
+    source_dir.mkdir()
+
+    # Neither has extension dir -> defaults to install_dir / extension
+    assert resolve_extension_dir(install_dir, source_dir) == (install_dir / "extension").resolve()
+
+    # Source has extension dir
+    (source_dir / "extension").mkdir()
+    assert resolve_extension_dir(install_dir, source_dir) == (source_dir / "extension").resolve()
+
+    # Install has extension dir -> prioritizes install_dir
+    (install_dir / "extension").mkdir()
+    assert resolve_extension_dir(install_dir, source_dir) == (install_dir / "extension").resolve()
 
 
 def test_setup_host_test_subcommand_idle_and_active():

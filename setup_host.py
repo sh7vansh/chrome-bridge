@@ -233,6 +233,20 @@ def resolve_install_dir(target_arg: Optional[str], is_dev: bool) -> Path:
     return resolve_home_dir() / ".chrome-bridge"
 
 
+def resolve_extension_dir(install_dir: Path, source_dir: Optional[Path] = None) -> Path:
+    """Resolve the unpacked Chrome extension directory path."""
+    inst_ext = install_dir / "extension"
+    if inst_ext.exists():
+        return inst_ext.resolve()
+
+    src = source_dir or Path(__file__).resolve().parent
+    src_ext = src / "extension"
+    if src_ext.exists():
+        return src_ext.resolve()
+
+    return inst_ext.resolve()
+
+
 def resolve_python_executable(install_dir: Path) -> str:
     """Find the most appropriate Python executable."""
     venv_dir = install_dir / ".venv"
@@ -828,19 +842,25 @@ def run_setup(args: argparse.Namespace) -> int:
         sp.ok(f"Configured {len(configured_clients)} MCP client(s): {', '.join(configured_clients)}")
 
     if not quiet:
+        ext_dir = resolve_extension_dir(install_dir, source_dir)
         print()
         print(ui.card("Setup Summary & Ready State", [
             ("Status", ui.green("INSTALLATION READY")),
             ("Browsers", ", ".join(configured_browsers) if configured_browsers else "Default system paths"),
             ("MCP Clients", ", ".join(configured_clients) if configured_clients else "None configured"),
-            ("Extension Link", f"https://chromewebstore.google.com/detail/{EXTENSION_ID}"),
+            ("Extension Path", str(ext_dir)),
         ]))
         print()
+        print(bold("🧩 EXTENSION INSTALLATION INSTRUCTIONS:"))
+        print(f"  1. Open Google Chrome and navigate to: {bold(cyan('chrome://extensions/'))}")
+        print(f"  2. Enable {bold('Developer mode')} (toggle in the top-right corner).")
+        print(f"  3. Click {bold('Load unpacked')} (top-left) and select the extension folder:")
+        print(f"     👉 {bold(green(str(ext_dir)))}")
+        print(f"  4. Click the {bold(cyan('Chrome Bridge'))} icon in your Chrome toolbar to connect.\n")
 
     # Step 6: Live Handshake Verification Loop
     if not quiet and not getattr(args, "no_listen", False):
         print(bold("📡 LIVE EXTENSION VERIFICATION:"))
-        print(f"  👉 Open Chrome and click the {bold(cyan('Chrome Bridge'))} icon in your toolbar.\n")
         timeout = float(getattr(args, "timeout", 15.0) or 15.0)
         wait_for_extension_handshake(timeout_sec=timeout)
 
@@ -1250,11 +1270,13 @@ def run_status(args: argparse.Namespace) -> int:
     host_wrapper = install_dir / ("native-host.bat" if IS_WINDOWS else "native-host.sh")
     mcp_server = install_dir / "mcp_server.py"
     agent_skill = home_dir / ".agent" / "skills" / "chrome-bridge" / "SKILL.md"
+    ext_dir = resolve_extension_dir(install_dir)
 
     print(ui.card("System & Runtime Diagnostics", [
         ("Platform", f"{platform.system()} ({platform.machine()}) - {platform.release()}"),
         ("Python", f"{sys.version.split()[0]} ({sys.executable})"),
         ("Runtime Root", f"{install_dir} ({'Found' if install_dir.exists() else 'Missing'})"),
+        ("Extension Dir", f"{ext_dir} ({'Found' if ext_dir.exists() else 'Missing'})"),
         ("Python venv", f"{venv_py} ({'Active' if has_venv else 'Not Provisioned'})"),
         ("Native Host", f"{host_script} ({'Present' if host_script.exists() else 'Missing'})"),
         ("Host Launcher", f"{host_wrapper} ({'Present' if host_wrapper.exists() else 'Not Generated'})"),
