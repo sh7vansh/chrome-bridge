@@ -2,7 +2,7 @@
 .SYNOPSIS
     Chrome Bridge 2.0 - Windows Setup & Diagnostics Script
 .DESCRIPTION
-    Automates Windows environment checks (Node.js, Python/uv), virtual environment setup,
+    Automates Windows environment checks (Python/uv), virtual environment setup,
     Chrome Native Messaging Host registration, MCP configuration, and self-testing.
 .PARAMETER SkipTests
     Skip running the automated test suite after setup.
@@ -55,27 +55,15 @@ function Write-Err {
     Write-Host "  [x] $Message" -ForegroundColor Red
 }
 
-Write-Header "🚀 Chrome Bridge 2.0 — Windows Setup Assistant"
+Write-Header "🚀 Chrome Bridge 2.0 — Pure Python Windows Setup Assistant"
 
 Write-Host "`n📋 System Environment Check:" -ForegroundColor White
 Write-Host "  • Working Directory: $ScriptDir" -ForegroundColor Gray
 Write-Host "  • PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Gray
 Write-Host "  • Operating System:  $([System.Environment]::OSVersion.VersionString)" -ForegroundColor Gray
 
-# --- 1. Validate Node.js ---
-Write-Step "[1/4] Validating Node.js Runtime..."
-$nodeCmd = Get-Command "node" -ErrorAction SilentlyContinue
-if (-not $nodeCmd) {
-    Write-Err "Node.js is not found in PATH."
-    Write-Host "     Please install Node.js (LTS):" -ForegroundColor Yellow
-    Write-Host "     👉 winget install OpenJS.NodeJS.LTS" -ForegroundColor White
-    exit 1
-}
-$nodeVersion = (node --version).Trim()
-Write-Success "Node.js $nodeVersion detected at: $($nodeCmd.Source)"
-
-# --- 2. Validate Python / uv ---
-Write-Step "[2/4] Validating Python Runtime & Package Managers..."
+# --- 1. Validate Python / uv ---
+Write-Step "[1/3] Validating Python Runtime & Package Managers..."
 $hasUv = [bool](Get-Command "uv" -ErrorAction SilentlyContinue)
 $pythonExe = $null
 
@@ -108,8 +96,8 @@ if (-not $pythonExe -and -not $hasUv) {
     exit 1
 }
 
-# --- 3. Provision Virtual Environment (.venv) ---
-Write-Step "[3/4] Provisioning Python Virtual Environment (.venv)..."
+# --- 2. Provision Virtual Environment (.venv) ---
+Write-Step "[2/3] Provisioning Python Virtual Environment (.venv)..."
 $venvDir = Join-Path $ScriptDir ".venv"
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
@@ -143,9 +131,16 @@ if (Test-Path $venvPython) {
     Write-Warn "Virtual environment python not located at expected path. Using system python."
 }
 
-# --- 4. Native Messaging Host Registration ---
-Write-Step "[4/4] Registering Native Messaging Host & MCP Configurations..."
-node setup-host.mjs
+# --- 3. Native Messaging Host Registration ---
+Write-Step "[3/3] Registering Native Messaging Host & MCP Configurations..."
+$setupPy = Join-Path $ScriptDir "setup_host.py"
+if (Test-Path $venvPython) {
+    & $venvPython $setupPy
+} elseif ($pythonExe) {
+    & $pythonExe $setupPy
+} else {
+    python $setupPy
+}
 
 # Verify Windows Registry Key
 $regPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.chrome_bridge.native"
@@ -155,7 +150,7 @@ if (Test-Path $regPath) {
     Write-Warn "Registry key at $regPath could not be verified directly."
 }
 
-# --- 5. Self-Testing & Diagnostic Verification ---
+# --- 4. Self-Testing & Diagnostic Verification ---
 if (-not $SkipTests) {
     Write-Step "Running automated self-tests..."
     try {
@@ -170,7 +165,7 @@ if (-not $SkipTests) {
     }
 }
 
-# --- 6. Final Instructions ---
+# --- 5. Final Instructions ---
 $extensionPath = Join-Path $ScriptDir "extension"
 Write-Host @"
 
@@ -186,4 +181,3 @@ Next Steps:
   4. Ensure the extension is enabled and active!
 
 "@ -ForegroundColor Green
-

@@ -285,8 +285,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mcpConfig = {
       mcpServers: {
         "chrome-bridge": {
-          "command": "python3",
-          "args": ["mcp_server.py"]
+          "command": "uvx",
+          "args": ["antigravity-chrome-bridge", "mcp"]
         }
       }
     };

@@ -46,7 +46,7 @@ flowchart LR
     end
 
     subgraph NativeBridge ["OS Native Bridge"]
-        C["Native Messaging Host<br/>(native-host.mjs / stdio)"]
+        C["Native Messaging Host<br/>(native_host.py / stdio)"]
         B -->|"Length-prefixed stdio"| C
     end
 
@@ -65,12 +65,12 @@ flowchart LR
 ### Step 1: Run the Automated Setup
 
 ```bash
-npx antigravity-chrome-bridge setup
+uvx antigravity-chrome-bridge setup
 ```
 
 This single command automatically:
 - Provisions the isolated Python runtime (`~/.chrome-bridge`).
-- Registers the Native Messaging Host for Chrome, Brave, and Edge.
+- Registers the Native Messaging Host for Chrome, Brave, and Edge across Linux, macOS, and Windows.
 - Automatically configures MCP servers for **Claude Code**, **Claude Desktop**, **Cursor**, and **Antigravity CLI**.
 
 <details>
@@ -101,8 +101,8 @@ If configuring a custom or manual MCP client:
 {
   "mcpServers": {
     "chrome-bridge": {
-      "command": "python3",
-      "args": ["~/.chrome-bridge/mcp_server.py"]
+      "command": "uvx",
+      "args": ["antigravity-chrome-bridge", "mcp"]
     }
   }
 }

@@ -18,7 +18,7 @@ Welcome to **Chrome Bridge** — a stateful, in-memory bridge between AI agents 
 - **Runtime:** Python 3.10+ with dependencies in `requirements.txt` / `pyproject.toml`.
 - **REPL Engine:** `repl_engine.py` maintains persistent session state across turns with auto-injected `sys.path`.
 - **SDK & Fast-Paths:** `chrome_sdk.py` exposes synchronous client, `Tab`, `Chrome`, and `TabMedia` controller.
-- **Native Host & Extension:** `native-host.mjs` handles Native Messaging to the Chrome extension in `extension/`.
+- **Native Host & Extension:** `native_host.py` handles Native Messaging to the Chrome extension in `extension/`.
 - **MCP Server:** `mcp_server.py` exposes tools over Model Context Protocol with auto-injected `sys.path`.
 
 ### 3. Testing & Verification

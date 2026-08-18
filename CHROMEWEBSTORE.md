@@ -24,7 +24,7 @@ Key Capabilities:
 
 How It Works:
 1. Install the extension in Google Chrome.
-2. Run the companion MCP host script on your machine (`npm run setup`).
+2. Run the companion setup command on your machine (`uvx antigravity-chrome-bridge setup`).
 3. Add the MCP server configuration to your AI assistant.
 4. Your AI agent can now inspect and automate your browser sessions on demand.
 
@@ -49,7 +49,7 @@ English
 
 | Permission | Type | Justification |
 | :--- | :--- | :--- |
-| `nativeMessaging` | `permissions` | Required to exchange automation commands and responses with the local MCP server process (`native-host.mjs`) on the user's machine over stdio. |
+| `nativeMessaging` | `permissions` | Required to exchange automation commands and responses with the local MCP server process (`native_host.py`) on the user's machine over stdio. |
 | `scripting` | `permissions` | Required to programmatically inspect page DOM elements, read semantic article text, and interact with form inputs as requested by the user's AI assistant. |
 | `tabs` | `permissions` | Required to query open browser tabs, retrieve active tab metadata (URL and title), and navigate tabs on behalf of the user. |
 | `activeTab` | `permissions` | Required to access and interact with the currently focused tab when invoked by the user. |

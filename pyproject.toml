@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "antigravity-chrome-bridge"
 version = "2.0.19"
@@ -9,7 +13,13 @@ dependencies = [
 ]
 
 [project.scripts]
+antigravity-chrome-bridge = "setup_host:main"
+chrome-bridge = "setup_host:main"
 chrome-bridge-mcp = "mcp_server:main"
+chrome-bridge-native-host = "native_host:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

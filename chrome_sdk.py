@@ -344,7 +344,7 @@ DEFAULT_BROWSER_UNAVAILABLE_MSG = (
     "Troubleshooting checklist:\n"
     "  1. Ensure Google Chrome is open and running.\n"
     "  2. Verify Chrome Bridge is active in Chrome.\n"
-    "  3. Re-run setup on this machine: node setup-host.mjs or ./setup.sh"
+    "  3. Re-run setup on this machine: uvx antigravity-chrome-bridge setup or ./setup.sh"
 )
 
 
