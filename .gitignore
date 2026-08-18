@@ -22,3 +22,4 @@ build/
 htmlcov/
 .cache/
 issues/
+docs/
