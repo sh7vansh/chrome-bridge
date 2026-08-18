@@ -15,6 +15,7 @@ skills-lock.json
 com.antigravity.chrome_bridge.json
 com.chrome_bridge.native.json
 native-host.bat
+native-host.sh
 dist/
 build/
 *.egg-info/
