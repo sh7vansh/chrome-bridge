@@ -55,6 +55,11 @@ def test_cleanup_ipc_endpoints_removes_files(tmp_path):
 
     # Create dummy endpoint file
     os.makedirs(os.path.dirname(test_file), exist_ok=True)
+    if os.path.exists(test_file):
+        try:
+            os.unlink(test_file)
+        except OSError:
+            pass
     with open(test_file, "w", encoding="utf-8") as f:
         f.write("dummy")
     assert os.path.exists(test_file)
