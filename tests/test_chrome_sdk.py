@@ -44,6 +44,66 @@ def test_tab_actions_dispatch_correct_payloads():
     assert res["status"] == "ok"
 
 
+def test_tab_close_on_last_tab_spawns_blank_tab_first():
+    client = MagicMock()
+    client.call.side_effect = [
+        # list_tabs response (only 1 tab remaining)
+        [{"id": 2, "url": "https://example.com", "title": "Last Tab"}],
+        # navigate (newTab: True) response
+        {"tabId": 3, "url": "about:blank"},
+        # close_tab response
+        {"success": True, "closedTabId": 2},
+    ]
+
+    tab = Tab(tab_id=2, client=client)
+    res = tab.close()
+
+    assert res["success"] is True
+    assert client.call.call_count == 3
+    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[1][0] == ("navigate", {"url": "about:blank", "newTab": True})
+    assert client.call.call_args_list[2][0] == ("close_tab", {"tabId": 2})
+
+
+def test_tab_close_with_multiple_tabs_does_not_spawn_new_tab():
+    client = MagicMock()
+    client.call.side_effect = [
+        # list_tabs response (2 tabs)
+        [
+            {"id": 2, "url": "https://example.com", "title": "Tab 1"},
+            {"id": 3, "url": "https://google.com", "title": "Tab 2"},
+        ],
+        # close_tab response
+        {"success": True, "closedTabId": 2},
+    ]
+
+    tab = Tab(tab_id=2, client=client)
+    res = tab.close()
+
+    assert res["success"] is True
+    assert client.call.call_count == 2
+    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[1][0] == ("close_tab", {"tabId": 2})
+
+
+def test_tab_close_fallback_on_list_tabs_error():
+    client = MagicMock()
+    client.call.side_effect = [
+        # list_tabs fails
+        RuntimeError("Transient error"),
+        # direct close_tab fallback
+        {"success": True, "closedTabId": 2},
+    ]
+
+    tab = Tab(tab_id=2, client=client)
+    res = tab.close()
+
+    assert res["success"] is True
+    assert client.call.call_count == 2
+    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[1][0] == ("close_tab", {"tabId": 2})
+
+
 def test_tab_type_action():
     client = MagicMock()
     client.call.return_value = {"status": "ok", "action": "type", "target": "[#3]"}

@@ -563,8 +563,19 @@ class Tab:
         return self._client.call("switch_tab", {"tabId": self.id})
 
     def close(self) -> Dict[str, Any]:
-        """Close this tab."""
-        return self._client.call("close_tab", {"tabId": self.id})
+        """
+        Safely closes the tab. If this is the last open tab in the browser,
+        it spawns a clean 'about:blank' tab first to prevent Chrome from
+        terminating the entire window and severing the bridge connection.
+        """
+        try:
+            tabs = self._client.call("list_tabs")
+            if isinstance(tabs, list) and len(tabs) <= 1:
+                self._client.call("navigate", {"url": "about:blank", "newTab": True})
+            return self._client.call("close_tab", {"tabId": self.id})
+        except Exception:
+            # Fallback to direct close if tab listing fails
+            return self._client.call("close_tab", {"tabId": self.id})
 
     def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
         """

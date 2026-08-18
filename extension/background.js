@@ -216,11 +216,12 @@ async function handleAction(action, params) {
       return tab ? { id: tab.id, url: tab.url, title: tab.title, favIconUrl: tab.favIconUrl, active: tab.active } : null;
     }
 
+    case 'new_tab':
     case 'navigate': {
-      const { url, tabId, newTab = false } = params;
-      if (!url) throw new Error('Missing "url" parameter');
-      if (newTab) {
-        const created = await chrome.tabs.create({ url, active: true });
+      const { url = 'about:blank', tabId, newTab = (action === 'new_tab') } = params;
+      if (!url && action === 'navigate') throw new Error('Missing "url" parameter');
+      if (newTab || action === 'new_tab') {
+        const created = await chrome.tabs.create({ url: url || 'about:blank', active: true });
         return { tabId: created.id, url: created.url };
       }
       const targetId = await resolveTabId(tabId);
