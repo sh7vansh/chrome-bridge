@@ -12,6 +12,13 @@ if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
 try:
+    from chrome_sdk import auto_bootstrap_environment
+    auto_bootstrap_environment()
+except ImportError:
+    pass
+
+
+try:
     from mcp.server import MCPServer as FastMCP
 except ImportError:
     try:

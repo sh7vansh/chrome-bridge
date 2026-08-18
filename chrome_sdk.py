@@ -29,6 +29,61 @@ PORT_FILE = DEFAULT_PORT_FILE
 TargetLocator = Union[int, str]
 
 
+def resolve_runtime_directory() -> str:
+    """Resolve the active Chrome Bridge runtime directory across standard candidate locations."""
+    cwd = os.getcwd()
+    file_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
+
+    candidates: List[str] = [
+        cwd,
+        os.path.expanduser("~/.chrome-bridge"),
+        os.path.expanduser("~/chrome-bridge"),
+    ]
+    if file_dir and file_dir not in candidates:
+        candidates.append(file_dir)
+
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "chrome_sdk.py")):
+            return os.path.abspath(c)
+    return os.path.abspath(os.path.expanduser("~/.chrome-bridge"))
+
+
+
+def auto_bootstrap_environment(target_dir: Optional[str] = None) -> List[str]:
+    """Auto-discover and attach runtime directories and .venv site-packages to sys.path.
+
+    Returns list of site-packages paths attached.
+    """
+    import glob
+    import site
+
+    added_paths: List[str] = []
+    base_dir = os.path.abspath(target_dir) if target_dir else resolve_runtime_directory()
+
+    if base_dir not in sys.path:
+        sys.path.insert(0, base_dir)
+
+    venv_dir = os.path.join(base_dir, ".venv")
+    if os.path.isdir(venv_dir):
+        if sys.platform == "win32":
+            sp = os.path.join(venv_dir, "Lib", "site-packages")
+            if os.path.isdir(sp) and sp not in sys.path:
+                site.addsitedir(sp)
+                added_paths.append(sp)
+        else:
+            for sp in glob.glob(os.path.join(venv_dir, "lib", "python*", "site-packages")):
+                if os.path.isdir(sp) and sp not in sys.path:
+                    site.addsitedir(sp)
+                    added_paths.append(sp)
+
+    return added_paths
+
+
+# Automatically bootstrap runtime environment and site-packages on import
+auto_bootstrap_environment()
+
+
+
 class ChromeBridgeError(Exception):
     """Base exception for all Chrome Bridge operations."""
 

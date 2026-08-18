@@ -85,10 +85,8 @@ let INSTALL_DIR = customTarget;
 if (!INSTALL_DIR) {
   if (isDevFlag) {
     INSTALL_DIR = __dirname;
-  } else if (isNpxOrGlobal || !existsSync(join(__dirname, '.git'))) {
-    INSTALL_DIR = join(homedir(), '.chrome-bridge');
   } else {
-    INSTALL_DIR = __dirname;
+    INSTALL_DIR = join(homedir(), '.chrome-bridge');
   }
 }
 
@@ -116,7 +114,9 @@ if (command === 'status') {
   }
 
   const hostScript = join(INSTALL_DIR, 'native-host.mjs');
+  const hostWrapper = isWindows ? join(INSTALL_DIR, 'native-host.bat') : join(INSTALL_DIR, 'native-host.sh');
   console.log(`  ${c.bold}Native Host:${c.reset}    ${hostScript} ${existsSync(hostScript) ? `${c.green}[Present]${c.reset}` : `${c.red}[Missing]${c.reset}`}`);
+  console.log(`  ${c.bold}Host Launcher:${c.reset}  ${hostWrapper} ${existsSync(hostWrapper) ? `${c.green}[Present]${c.reset}` : `${c.yellow}[Not Generated]${c.reset}`}`);
 
   const mcpServer = join(INSTALL_DIR, 'mcp_server.py');
   console.log(`  ${c.bold}MCP Server:${c.reset}     ${mcpServer} ${existsSync(mcpServer) ? `${c.green}[Present]${c.reset}` : `${c.red}[Missing]${c.reset}`}`);
@@ -126,11 +126,25 @@ if (command === 'status') {
 
   console.log(`\n${c.bold}🌐 Browser Native Messaging Manifests:${c.reset}`);
   const testPaths = [
+    // Traditional Linux
     join(homedir(), '.config', 'google-chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`),
     join(homedir(), '.config', 'chromium', 'NativeMessagingHosts', `${HOST_NAME}.json`),
     join(homedir(), '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts', `${HOST_NAME}.json`),
     join(homedir(), '.config', 'microsoft-edge', 'NativeMessagingHosts', `${HOST_NAME}.json`),
-    join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`)
+    // Flatpak Linux
+    join(homedir(), '.var', 'app', 'com.google.Chrome', 'config', 'google-chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), '.var', 'app', 'org.chromium.Chromium', 'config', 'chromium', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), '.var', 'app', 'com.brave.Browser', 'config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), '.var', 'app', 'com.microsoft.Edge', 'config', 'microsoft-edge', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    // Snap Linux
+    join(homedir(), 'snap', 'chromium', 'current', '.config', 'chromium', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), 'snap', 'brave', 'current', '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), 'snap', 'edge', 'current', '.config', 'microsoft-edge', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    // macOS
+    join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), 'Library', 'Application Support', 'Chromium', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts', `${HOST_NAME}.json`),
+    join(homedir(), 'Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts', `${HOST_NAME}.json`)
   ];
 
   let foundManifests = 0;
@@ -190,6 +204,8 @@ if (INSTALL_DIR !== __dirname) {
   
   const runtimeFiles = [
     'native-host.mjs',
+    'native-host.sh',
+    'native-host.bat',
     'mcp_server.py',
     'repl_engine.py',
     'chrome_sdk.py',
@@ -220,17 +236,6 @@ if (INSTALL_DIR !== __dirname) {
   }
 } else {
   console.log(`  ${c.green}✓${c.reset} Running directly from repository source directory.`);
-}
-
-// Ensure native-host.mjs is executable on POSIX systems
-const targetNativeHostScript = join(INSTALL_DIR, 'native-host.mjs');
-if (!isWindows && existsSync(targetNativeHostScript)) {
-  try {
-    chmodSync(targetNativeHostScript, 0o755);
-    console.log(`  ${c.green}✓${c.reset} Set executable permissions (0755) on ${targetNativeHostScript}`);
-  } catch (err) {
-    console.warn(`  ${c.yellow}⚠️ Could not chmod native-host.mjs:${c.reset}`, err.message);
-  }
 }
 
 // 2. Resolve / Bootstrap Python Environment
@@ -328,6 +333,65 @@ if (isWindows) {
   } catch (err) {
     console.warn(`  ${c.yellow}⚠️ Failed to generate native-host.bat:${c.reset}`, err.message);
   }
+} else {
+  const shPath = join(INSTALL_DIR, 'native-host.sh');
+  const nodeExec = process.execPath;
+  const shContent = `#!/bin/sh
+# Chrome Bridge Native Host POSIX Launcher Wrapper
+export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
+
+# Pinned Node.js binary captured during setup
+PINNED_NODE="${nodeExec}"
+
+if [ -x "$PINNED_NODE" ]; then
+  NODE_BIN="$PINNED_NODE"
+else
+  # Fallback probes for Homebrew, NVM, FNM, ASDF, and standard bin paths
+  NODE_BIN=""
+  for candidate in \\
+    "/opt/homebrew/bin/node" \\
+    "/usr/local/bin/node" \\
+    "$HOME/.nvm/versions/node/$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | tail -n 1)/bin/node" \\
+    "$HOME/.fnm/current/bin/node" \\
+    "$HOME/.asdf/shims/node" \\
+    "$HOME/.local/bin/node" \\
+    "/usr/bin/node"; do
+    if [ -x "$candidate" ]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+  if [ -z "$NODE_BIN" ]; then
+    NODE_BIN="$(command -v node 2>/dev/null || which node 2>/dev/null || echo "node")"
+  fi
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$NODE_BIN" "$SCRIPT_DIR/native-host.mjs" "$@"
+`;
+  try {
+    writeFileSync(shPath, shContent);
+    chmodSync(shPath, 0o755);
+    console.log(`  ${c.green}✓${c.reset} Generated POSIX Host Shell Wrapper (0755): ${shPath}`);
+    hostExecutablePath = shPath;
+  } catch (err) {
+    console.warn(`  ${c.yellow}⚠️ Failed to generate native-host.sh:${c.reset}`, err.message);
+  }
+}
+
+// Ensure both host scripts receive 0755 executable permissions on POSIX
+if (!isWindows) {
+  for (const scriptPath of [join(INSTALL_DIR, 'native-host.mjs'), join(INSTALL_DIR, 'native-host.sh')]) {
+    if (existsSync(scriptPath)) {
+      try {
+        chmodSync(scriptPath, 0o755);
+        console.log(`  ${c.green}✓${c.reset} Set executable permissions (0755) on ${scriptPath}`);
+      } catch (err) {
+        console.warn(`  ${c.yellow}⚠️ Could not chmod ${scriptPath}:${c.reset}`, err.message);
+      }
+    }
+  }
 }
 
 const manifest = {
@@ -360,18 +424,37 @@ if (isWindows) {
     } catch {}
   }
 } else {
-  const browserDirs = [
-    // Linux
-    { browser: 'Google Chrome', path: join(homedir(), '.config', 'google-chrome', 'NativeMessagingHosts') },
-    { browser: 'Chromium', path: join(homedir(), '.config', 'chromium', 'NativeMessagingHosts') },
-    { browser: 'Brave Browser', path: join(homedir(), '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
-    { browser: 'Microsoft Edge', path: join(homedir(), '.config', 'microsoft-edge', 'NativeMessagingHosts') },
-    // macOS
-    { browser: 'Google Chrome (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts') },
-    { browser: 'Chromium (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Chromium', 'NativeMessagingHosts') },
-    { browser: 'Brave (macOS)', path: join(homedir(), 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
-    { browser: 'Edge (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts') }
-  ];
+  let browserDirs = [];
+  if (isLinux) {
+    browserDirs = [
+      // Traditional Linux
+      { browser: 'Google Chrome', path: join(homedir(), '.config', 'google-chrome', 'NativeMessagingHosts') },
+      { browser: 'Chromium', path: join(homedir(), '.config', 'chromium', 'NativeMessagingHosts') },
+      { browser: 'Brave Browser', path: join(homedir(), '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
+      { browser: 'Microsoft Edge', path: join(homedir(), '.config', 'microsoft-edge', 'NativeMessagingHosts') },
+      // Flatpak Linux
+      { browser: 'Google Chrome (Flatpak)', path: join(homedir(), '.var', 'app', 'com.google.Chrome', 'config', 'google-chrome', 'NativeMessagingHosts') },
+      { browser: 'Chromium (Flatpak)', path: join(homedir(), '.var', 'app', 'org.chromium.Chromium', 'config', 'chromium', 'NativeMessagingHosts') },
+      { browser: 'Brave Browser (Flatpak)', path: join(homedir(), '.var', 'app', 'com.brave.Browser', 'config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
+      { browser: 'Microsoft Edge (Flatpak)', path: join(homedir(), '.var', 'app', 'com.microsoft.Edge', 'config', 'microsoft-edge', 'NativeMessagingHosts') },
+      // Snap Linux
+      { browser: 'Chromium (Snap)', path: join(homedir(), 'snap', 'chromium', 'current', '.config', 'chromium', 'NativeMessagingHosts') },
+      { browser: 'Brave Browser (Snap)', path: join(homedir(), 'snap', 'brave', 'current', '.config', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
+      { browser: 'Microsoft Edge (Snap)', path: join(homedir(), 'snap', 'edge', 'current', '.config', 'microsoft-edge', 'NativeMessagingHosts') }
+    ];
+  } else if (isMac) {
+    browserDirs = [
+      // macOS
+      { browser: 'Google Chrome (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts') },
+      { browser: 'Chromium (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Chromium', 'NativeMessagingHosts') },
+      { browser: 'Brave (macOS)', path: join(homedir(), 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts') },
+      { browser: 'Edge (macOS)', path: join(homedir(), 'Library', 'Application Support', 'Microsoft Edge', 'NativeMessagingHosts') }
+    ];
+  } else {
+    browserDirs = [
+      { browser: 'Google Chrome', path: join(homedir(), '.config', 'google-chrome', 'NativeMessagingHosts') }
+    ];
+  }
 
   for (const item of browserDirs) {
     try {
@@ -383,11 +466,28 @@ if (isWindows) {
   }
 }
 
-// 4. Install Agent Skill into ~/.agent/skills and ~/.gemini/...
+// 4. Install Agent Skill into ~/.agents/skills, ~/.agent/skills and ~/.gemini/...
 console.log(`\n${c.bold}${c.yellow}[4/5] Installing Agent Skill (chrome-bridge)...${c.reset}`);
-const skillSource = join(INSTALL_DIR, '.agents', 'skills', 'chrome-bridge', 'SKILL.md');
 
-if (existsSync(skillSource)) {
+const skillCandidates = [
+  join(INSTALL_DIR, '.agents', 'skills', 'chrome-bridge', 'SKILL.md'),
+  join(INSTALL_DIR, 'SKILL.md'),
+  join(INSTALL_DIR, 'skills', 'chrome-bridge', 'SKILL.md'),
+  join(__dirname, '.agents', 'skills', 'chrome-bridge', 'SKILL.md'),
+  join(__dirname, 'SKILL.md'),
+  join(__dirname, 'skills', 'chrome-bridge', 'SKILL.md')
+];
+
+let skillSource = null;
+for (const candidate of skillCandidates) {
+  if (existsSync(candidate)) {
+    skillSource = candidate;
+    break;
+  }
+}
+
+if (skillSource) {
+  console.log(`  ${c.cyan}↳ Resolved skill source:${c.reset} ${skillSource}`);
   const destDirs = [
     { target: 'Antigravity Global Agent (.agents)', dir: join(homedir(), '.agents', 'skills', 'chrome-bridge') },
     { target: 'Antigravity Global Agent (.agent)', dir: join(homedir(), '.agent', 'skills', 'chrome-bridge') },
@@ -404,8 +504,9 @@ if (existsSync(skillSource)) {
     }
   }
 } else {
-  console.log(`  ${c.yellow}⚠️ Skill file not found at ${skillSource}. Skipping skill copy.${c.reset}`);
+  console.log(`  ${c.yellow}⚠️ Skill file not found across candidate paths. Skipping skill copy.${c.reset}`);
 }
+
 
 // 5. Automatically update MCP configurations across clients
 console.log(`\n${c.bold}${c.yellow}[5/5] Configuring Model Context Protocol (MCP) Clients...${c.reset}`);

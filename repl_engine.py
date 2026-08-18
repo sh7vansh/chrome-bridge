@@ -14,19 +14,12 @@ _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
-# Ensure UTF-8 streams cross-platform (especially on Windows)
-if sys.platform == "win32":
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        if hasattr(sys.stdin, "reconfigure"):
-            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+try:
+    from chrome_sdk import ChromeBridgeError, auto_bootstrap_environment
+    auto_bootstrap_environment()
+except ImportError:
+    from chrome_sdk import ChromeBridgeError
 
-from chrome_sdk import ChromeBridgeError
 
 
 class OutputBudgetFormatter:

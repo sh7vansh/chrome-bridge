@@ -47,12 +47,27 @@ When spawning a fresh worker (or resetting workers post-recycle), inject the sta
 Subagents and worker scripts execute with the standard import preamble:
 
 ```python
-import sys, os
-bridge_dir = os.path.expanduser("~/chrome-bridge")
-if bridge_dir not in sys.path:
-    sys.path.insert(0, bridge_dir)
+import sys, os, site, glob
+
+for p in [os.getcwd(), os.path.expanduser("~/.chrome-bridge"), os.path.expanduser("~/chrome-bridge")]:
+    if os.path.exists(os.path.join(p, "chrome_sdk.py")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        venv = os.path.join(p, ".venv")
+        if os.path.isdir(venv):
+            if sys.platform == "win32":
+                sp = os.path.join(venv, "Lib", "site-packages")
+                if os.path.isdir(sp):
+                    site.addsitedir(sp)
+            else:
+                for sp in glob.glob(os.path.join(venv, "lib", "python*", "site-packages")):
+                    if os.path.isdir(sp):
+                        site.addsitedir(sp)
+        break
+
 from chrome_sdk import chrome
 ```
+
 
 ---
 
