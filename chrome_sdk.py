@@ -1,11 +1,13 @@
 """Synchronous Python SDK and IPC Client for Chrome Bridge."""
 
+import contextlib
 import json
 import os
 import re
 import socket
 import sys
 import time
+from collections import deque
 from typing import Any, Dict, List, Optional, Union
 
 import tempfile
@@ -91,6 +93,250 @@ class ChromeBridgeError(Exception):
         super().__init__(message)
         self.tab_id = tab_id
         self.auto_snapshot: Optional[str] = None
+
+
+class SecurityException(ChromeBridgeError):
+    """Raised when an operation violates Chrome Bridge zero-latency security policies."""
+
+    def __init__(
+        self,
+        message: str,
+        status: str = "BLOCKED_SECURITY_VIOLATION",
+        tab_id: Optional[int] = None,
+    ):
+        super().__init__(message, tab_id=tab_id)
+        self.status = status
+
+
+class RunawayLoopDetectedError(SecurityException):
+    """Raised when a repetitive action, oscillation, or scroll runaway loop is detected."""
+
+    def __init__(
+        self,
+        message: str,
+        status: str = "RUNAWAY_LOOP_DETECTED",
+        tab_id: Optional[int] = None,
+    ):
+        super().__init__(message, status=status, tab_id=tab_id)
+
+
+CRITICAL_DELETION_TERMS = [
+    r"\bdelete[-_\s]+account\b",
+    r"\bcancel[-_\s]+account\b",
+    r"\bclose[-_\s]+account\b",
+    r"\bdelete[-_\s]+organization\b",
+    r"\bdelete[-_\s]+org\b",
+    r"\bterminate[-_\s]+subscription\b",
+    r"\bcancel[-_\s]+subscription\b",
+    r"\bpurge[-_\s]+database\b",
+    r"\bdrop[-_\s]+database\b",
+    r"\bdelete[-_\s]+repository\b",
+    r"\bdelete[-_\s]+repo\b",
+    r"\bwipe[-_\s]+data\b",
+]
+CRITICAL_DELETION_REGEX = re.compile("|".join(CRITICAL_DELETION_TERMS), re.IGNORECASE)
+
+SSO_ALLOWLIST = {
+    "accounts.google.com",
+    "github.com",
+    "login.microsoftonline.com",
+    "appleid.apple.com",
+    "auth0.com",
+    "login.live.com",
+    "auth.github.com",
+    "gitlab.com",
+}
+
+
+def _extract_hostname(url: str) -> str:
+    """Extract clean lowercase hostname from URL or domain string."""
+    if not url:
+        return ""
+    if url == "about:blank" or url.startswith("chrome://"):
+        return ""
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    if parsed.netloc:
+        return parsed.netloc.split(":")[0].lower()
+    if not parsed.scheme and "/" not in url:
+        return url.split(":")[0].lower()
+    return ""
+
+
+def wrap_untrusted_data(content: str, origin: str = "", selector: str = "body") -> str:
+    """Wrap raw page content in strict XML structural boundaries and defang tag-breakout attempts."""
+    safe_content = str(content).replace("</UNTRUSTED_EXTERNAL_DATA>", "&lt;/UNTRUSTED_EXTERNAL_DATA&gt;")
+    safe_origin = str(origin).replace('"', '&quot;')
+    safe_selector = str(selector).replace('"', '&quot;')
+    return (
+        f'<UNTRUSTED_EXTERNAL_DATA origin="{safe_origin}" selector="{safe_selector}">\n'
+        f'{safe_content}\n'
+        f'</UNTRUSTED_EXTERNAL_DATA>'
+    )
+
+
+def defang_telemetry_payload(data: Any) -> Any:
+    """Recursively defang remote markdown image beacons and HTML active tags."""
+    if isinstance(data, str):
+        # Defang markdown image beacon: ![alt](url) -> [IMAGE_BLOCKED: alt | url]
+        s = re.sub(r"!\[(.*?)\]\((https?://[^\)]+)\)", r"[IMAGE_BLOCKED: \1 | \2]", data)
+        # Defang HTML media / active elements
+        s = re.sub(r"<(img|iframe|link)\b([^>]*)>", r"[TAG_BLOCKED: \1\2]", s, flags=re.IGNORECASE)
+        s = re.sub(r"</(img|iframe|link)>", r"", s, flags=re.IGNORECASE)
+        return s
+    elif isinstance(data, dict):
+        return {k: defang_telemetry_payload(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [defang_telemetry_payload(item) for item in data]
+    elif isinstance(data, tuple):
+        return tuple(defang_telemetry_payload(item) for item in data)
+    return data
+
+
+class ChromeBridgeWorkerTelemetry:
+    """Structured telemetry schema for subagent worker return payloads."""
+
+    def __init__(
+        self,
+        tab_id: Optional[int] = None,
+        origin: str = "",
+        url: str = "",
+        title: str = "",
+        status: str = "success",
+        extracted_data: Any = None,
+        count: int = 0,
+        execution_ms: float = 0.0,
+        media_state: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ):
+        self.tab_id = tab_id
+        self.origin = origin
+        self.url = url
+        self.title = title
+        self.status = status
+        self.extracted_data = extracted_data
+        self.count = count
+        self.execution_ms = execution_ms
+        self.media_state = media_state
+        self.error = error
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tab_id": self.tab_id,
+            "origin": self.origin,
+            "url": self.url,
+            "title": self.title,
+            "status": self.status,
+            "extracted_data": defang_telemetry_payload(self.extracted_data),
+            "count": self.count,
+            "execution_ms": self.execution_ms,
+            "media_state": self.media_state,
+            "error": self.error,
+        }
+
+
+class SafetyController:
+    """Zero-overhead safety and origin governance controller."""
+
+    def __init__(self):
+        self._permit_destructive_depth = 0
+        self._allowed_origins: set = set()
+
+    @contextlib.contextmanager
+    def permit_destructive(self):
+        self._permit_destructive_depth += 1
+        try:
+            yield
+        finally:
+            self._permit_destructive_depth = max(0, self._permit_destructive_depth - 1)
+
+    @property
+    def is_destructive_permitted(self) -> bool:
+        return self._permit_destructive_depth > 0
+
+    def allow_origin(self, url_or_domain: str) -> None:
+        host = _extract_hostname(url_or_domain)
+        if host:
+            self._allowed_origins.add(host.lower())
+
+    def is_origin_allowed(self, host: str, tab_origins: Optional[set] = None) -> bool:
+        if not host or host in ("about:blank", "localhost", "127.0.0.1"):
+            return True
+        h = host.lower()
+        if h in SSO_ALLOWLIST:
+            return True
+        for sso in SSO_ALLOWLIST:
+            if h.endswith("." + sso):
+                return True
+        if h in self._allowed_origins:
+            return True
+        for allowed in self._allowed_origins:
+            if h == allowed or h.endswith("." + allowed):
+                return True
+        if tab_origins:
+            for orig in tab_origins:
+                if h == orig or h.endswith("." + orig):
+                    return True
+        return False
+
+
+class ActionTracker:
+    """Sliding-window ring buffer to intercept repetitive clicks, oscillations, and runaway scrolling."""
+
+    def __init__(self, maxlen: int = 20):
+        self.history = deque(maxlen=maxlen)
+        self.consecutive_scrolls = 0
+
+    def record_and_validate(self, action: str, target: Any, url: str, tab_id: Optional[int] = None) -> None:
+        now = time.time()
+        target_key = str(target) if target is not None else ""
+
+        if action == "scroll":
+            self.consecutive_scrolls += 1
+            if self.consecutive_scrolls > 10:
+                raise RunawayLoopDetectedError(
+                    f"Runaway scroll detected: {self.consecutive_scrolls} consecutive scrolls without interaction.",
+                    tab_id=tab_id,
+                )
+        else:
+            self.consecutive_scrolls = 0
+
+        # Repetitive click cap: >= 5 identical target clicks within 15s
+        if action in ("click", "click_ref"):
+            recent_clicks = [
+                (t, act, tgt)
+                for (t, act, tgt, u) in self.history
+                if act in ("click", "click_ref") and tgt == target_key and (now - t) <= 15.0
+            ]
+            if len(recent_clicks) >= 4:
+                raise RunawayLoopDetectedError(
+                    f"Repetitive click loop detected on target '{target_key}' (5 identical clicks within 15s).",
+                    tab_id=tab_id,
+                )
+
+        # Ping-pong oscillation: A -> B -> A -> B -> A -> (attempting B) -> 6 steps
+        if action in ("click", "click_ref"):
+            actions = list(self.history)[-5:]
+            if len(actions) == 5:
+                _, a0, tg0, _ = actions[0]
+                _, a1, tg1, _ = actions[1]
+                _, a2, tg2, _ = actions[2]
+                _, a3, tg3, _ = actions[3]
+                _, a4, tg4, _ = actions[4]
+                if (
+                    tg0 == tg2 == tg4 != tg1
+                    and tg1 == tg3 == target_key
+                    and a0 == a1 == a2 == a3 == a4 == action
+                ):
+                    raise RunawayLoopDetectedError(
+                        f"Ping-pong oscillation detected between '{tg0}' and '{target_key}'.",
+                        tab_id=tab_id,
+                    )
+
+        self.history.append((now, action, target_key, url))
+
+
+global_safety = SafetyController()
 
 
 DEFAULT_BROWSER_UNAVAILABLE_MSG = (
@@ -529,10 +775,30 @@ class Tab:
         self.url = url
         self.active = active
         self._media_controller: Optional[TabMedia] = None
+        self.allowed_origins: set = set()
+        if self.url:
+            host = _extract_hostname(self.url)
+            if host:
+                self.allowed_origins.add(host)
+        self._action_tracker = ActionTracker()
+        self.safety = global_safety
 
     def __repr__(self) -> str:
         tab_id_repr = self.id if self.id is not None else "active"
         return f'<Tab id={tab_id_repr} title="{self.title}" url="{self.url}" active={self.active}>'
+
+    @property
+    def origin(self) -> str:
+        if self.url:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(self.url)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+            if parsed.netloc:
+                return parsed.netloc
+            if not parsed.scheme and "/" not in self.url:
+                return self.url
+        return ""
 
     @property
     def info(self) -> Dict[str, Any]:
@@ -558,6 +824,30 @@ class Tab:
             self._media_controller = TabMedia(self)
         return self._media_controller
 
+    def _safety_check_action(
+        self,
+        action: str,
+        target: Any = None,
+        text: str = "",
+        safety_check: bool = True,
+    ) -> None:
+        if safety_check and not self.safety.is_destructive_permitted:
+            target_str = str(target) if target is not None else ""
+            if CRITICAL_DELETION_REGEX.search(target_str):
+                raise SecurityException(
+                    f"Destructive action blocked: Target '{target_str}' matches critical deletion pattern.",
+                    status="BLOCKED_DESTRUCTIVE_ACTION",
+                    tab_id=self.id,
+                )
+            if text and CRITICAL_DELETION_REGEX.search(text):
+                raise SecurityException(
+                    f"Destructive action blocked: Input text '{text}' matches critical deletion pattern.",
+                    status="BLOCKED_DESTRUCTIVE_ACTION",
+                    tab_id=self.id,
+                )
+
+        self._action_tracker.record_and_validate(action, target, self.url, tab_id=self.id)
+
     def activate(self) -> Dict[str, Any]:
         """Focus and switch to this tab."""
         return self._client.call("switch_tab", {"tabId": self.id})
@@ -577,11 +867,26 @@ class Tab:
             # Fallback to direct close if tab listing fails
             return self._client.call("close_tab", {"tabId": self.id})
 
-    def navigate(self, url: str, timeout: float = 30.0) -> Dict[str, Any]:
+    def navigate(self, url: str, timeout: float = 30.0, safety_check: bool = True) -> Dict[str, Any]:
         """
         Navigates the tab to the specified URL while neutralizing
         any 'beforeunload' dialogs (e.g., Leave/Stay prompts).
         """
+        target_host = _extract_hostname(url)
+        if safety_check and target_host:
+            tab_origins = set(self.allowed_origins)
+            if self.url:
+                current_host = _extract_hostname(self.url)
+                if current_host:
+                    tab_origins.add(current_host)
+
+            if tab_origins and not self.safety.is_origin_allowed(target_host, tab_origins):
+                raise SecurityException(
+                    f"Navigation blocked: '{url}' is outside task scope.",
+                    status="BLOCKED_ORIGIN_VIOLATION",
+                    tab_id=self.id,
+                )
+
         try:
             self.eval_js("""
                 window.onbeforeunload = null;
@@ -594,7 +899,9 @@ class Tab:
             pass
 
         res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
-        self.url = res.get("url", url)
+        self.url = res.get("url", url) if isinstance(res, dict) else url
+        if target_host:
+            self.allowed_origins.add(target_host)
         return res
 
     def reload(self, bypass_cache: bool = False) -> Dict[str, Any]:
@@ -609,15 +916,23 @@ class Tab:
         """Navigate forward in history."""
         return self._client.call("go_forward", {"tabId": self.id})
 
-    def snapshot(self, compact: bool = True) -> str:
+    def snapshot(self, compact: bool = True, wrap: bool = True) -> str:
         """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs."""
         res = self._client.call("get_page_content", {"tabId": self.id, "compact": compact})
-        if isinstance(res, dict):
-            return res.get("snapshot", "")
-        return str(res)
+        raw = res.get("snapshot", "") if isinstance(res, dict) else str(res)
+        if wrap:
+            return wrap_untrusted_data(raw, origin=self.origin, selector="document")
+        return raw
 
-    def click(self, target: TargetLocator, button: str = "left", count: int = 1) -> Dict[str, Any]:
+    def click(
+        self,
+        target: TargetLocator,
+        button: str = "left",
+        count: int = 1,
+        safety_check: bool = True,
+    ) -> Dict[str, Any]:
         """Click an element by Ref-ID or CSS selector."""
+        self._safety_check_action("click", target, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
             "click",
@@ -631,8 +946,10 @@ class Tab:
         text: str,
         clear: bool = True,
         press_enter: bool = False,
+        safety_check: bool = True,
     ) -> Dict[str, Any]:
         """Type text into an input or contenteditable element."""
+        self._safety_check_action("type", target, text=text, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
             "type",
@@ -646,12 +963,14 @@ class Tab:
             timeout=15.0,
         )
 
-    def press_key(self, key: str) -> Dict[str, Any]:
+    def press_key(self, key: str, safety_check: bool = True) -> Dict[str, Any]:
         """Press a keyboard key."""
+        self._safety_check_action("press_key", key, safety_check=safety_check)
         return self._client.call("press_key", {"key": key, "tabId": self.id})
 
-    def select(self, target: TargetLocator, value: str) -> Dict[str, Any]:
+    def select(self, target: TargetLocator, value: str, safety_check: bool = True) -> Dict[str, Any]:
         """Select an option in a dropdown."""
+        self._safety_check_action("select", target, text=value, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id})
 
@@ -662,14 +981,18 @@ class Tab:
 
     def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
         """Scroll the page or a specific container."""
+        self._action_tracker.record_and_validate("scroll", target, self.url, tab_id=self.id)
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("scroll", {"x": x, "y": y, "target": loc, "tabId": self.id})
 
-    def get_text(self, target: TargetLocator) -> str:
+    def get_text(self, target: TargetLocator, wrap: bool = True) -> str:
         """Get inner text of an element."""
         loc = normalize_locator(target)
         res = self._client.call("get_text", {"target": loc, "tabId": self.id})
-        return res.get("text", "") if isinstance(res, dict) else str(res)
+        raw = res.get("text", "") if isinstance(res, dict) else str(res)
+        if wrap:
+            return wrap_untrusted_data(raw, origin=self.origin, selector=str(target))
+        return raw
 
     def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
         """Get DOM attribute value."""
@@ -710,6 +1033,7 @@ class Chrome(Tab):
 
     def __init__(self, client: Optional[ChromeSocketClient] = None):
         super().__init__(tab_id=None, client=client or ChromeSocketClient(), active=True)
+        self.safety = global_safety
 
     def __repr__(self) -> str:
         return "<Chrome active_tab_context>"

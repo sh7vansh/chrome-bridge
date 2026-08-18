@@ -15,10 +15,43 @@ if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
 try:
-    from chrome_sdk import ChromeBridgeError, auto_bootstrap_environment
+    from chrome_sdk import ChromeBridgeError, auto_bootstrap_environment, defang_telemetry_payload
     auto_bootstrap_environment()
 except ImportError:
     from chrome_sdk import ChromeBridgeError
+    defang_telemetry_payload = lambda x: x
+
+
+class ExecutionTimeoutContext:
+    """Zero-overhead POSIX/thread execution watchdog timer."""
+
+    def __init__(self, timeout: Optional[float] = 30.0):
+        self.timeout = timeout
+        self._old_handler = None
+
+    def __enter__(self):
+        if not self.timeout or self.timeout <= 0:
+            return self
+
+        import signal
+        import threading
+        if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
+            def _alarm_handler(signum, frame):
+                raise TimeoutError(f"REPL execution timed out after {self.timeout:.1f}s")
+
+            self._old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+            signal.setitimer(signal.ITIMER_REAL, float(self.timeout))
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import signal
+        import threading
+        if hasattr(signal, "SIGALRM") and self._old_handler is not None:
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, self._old_handler)
+            except Exception:
+                pass
 
 
 
@@ -83,7 +116,8 @@ class OutputBudgetFormatter:
         if not sections:
             return "(executed successfully with no output)"
 
-        return "\n\n".join(sections)
+        raw_output = "\n\n".join(sections)
+        return defang_telemetry_payload(raw_output)
 
     def _truncate_string(self, text: str, budget: int) -> str:
         if len(text) <= budget:
@@ -187,7 +221,7 @@ class PythonReplSession:
         if globals_dict:
             self._globals.update(globals_dict)
 
-    def execute(self, code: str) -> str:
+    def execute(self, code: str, timeout: Optional[float] = 30.0) -> str:
         """Executes a Python code block against the persistent session."""
         code_str = code.strip()
         if not code_str:
@@ -216,29 +250,30 @@ class PythonReplSession:
         last_is_expr = isinstance(tree.body[-1], ast.Expr)
 
         try:
-            with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
-                if last_is_expr:
-                    # Split statements and final expression
-                    stmt_nodes = tree.body[:-1]
-                    expr_node = tree.body[-1]
+            with ExecutionTimeoutContext(timeout):
+                with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+                    if last_is_expr:
+                        # Split statements and final expression
+                        stmt_nodes = tree.body[:-1]
+                        expr_node = tree.body[-1]
 
-                    if stmt_nodes:
-                        stmt_module = ast.Module(body=stmt_nodes, type_ignores=[])
-                        stmt_code = compile(stmt_module, filename="<repl>", mode="exec")
-                        exec(stmt_code, self._globals, self._globals)
+                        if stmt_nodes:
+                            stmt_module = ast.Module(body=stmt_nodes, type_ignores=[])
+                            stmt_code = compile(stmt_module, filename="<repl>", mode="exec")
+                            exec(stmt_code, self._globals, self._globals)
 
-                    # Evaluate the trailing expression
-                    expr_ast = ast.Expression(body=expr_node.value)
-                    ast.copy_location(expr_ast, expr_node)
-                    expr_code = compile(expr_ast, filename="<repl>", mode="eval")
-                    result_value = eval(expr_code, self._globals, self._globals)
-                    has_result = True
-                    if result_value is not None:
-                        self._globals["_"] = result_value
-                else:
-                    code_compiled = compile(tree, filename="<repl>", mode="exec")
-                    exec(code_compiled, self._globals, self._globals)
-                    has_result = False
+                        # Evaluate the trailing expression
+                        expr_ast = ast.Expression(body=expr_node.value)
+                        ast.copy_location(expr_ast, expr_node)
+                        expr_code = compile(expr_ast, filename="<repl>", mode="eval")
+                        result_value = eval(expr_code, self._globals, self._globals)
+                        has_result = True
+                        if result_value is not None:
+                            self._globals["_"] = result_value
+                    else:
+                        code_compiled = compile(tree, filename="<repl>", mode="exec")
+                        exec(code_compiled, self._globals, self._globals)
+                        has_result = False
 
         except BaseException as e:
             error_msg = self._format_exception_message(e)

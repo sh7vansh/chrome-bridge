@@ -160,7 +160,7 @@ f"Found {len(tabs)} tabs. Snapshot has {len(snapshot.splitlines())} lines."
 """
     out1 = session.execute(turn1_code)
     assert "[result]" in out1
-    assert "Found 2 tabs. Snapshot has 5 lines." in out1
+    assert "Found 2 tabs. Snapshot has 7 lines." in out1
 
     # Turn 2: State persistence & multi-step automation workflow in one script
     turn2_code = """
