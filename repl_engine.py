@@ -5,9 +5,14 @@ import builtins
 import contextlib
 import io
 import math
+import os
 import sys
 import traceback
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
 
 # Ensure UTF-8 streams cross-platform (especially on Windows)
 if sys.platform == "win32":

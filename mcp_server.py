@@ -4,7 +4,13 @@
 Persistent Python REPL Runtime for AI Browser Automation.
 """
 
+import os
 import sys
+
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
 try:
     from mcp.server import MCPServer as FastMCP
 except ImportError:

@@ -342,6 +342,121 @@ class ChromeSocketClient:
             raise exc
 
 
+
+class TabMedia:
+    """Fast-path media controller attached to a Tab instance."""
+
+    _FIND_MEDIA_JS = """
+    function findMediaElement(root = document) {
+        let el = root.querySelector('video, audio');
+        if (el) return el;
+        const all = root.querySelectorAll('*');
+        for (const node of all) {
+            if (node.shadowRoot) {
+                const nested = findMediaElement(node.shadowRoot);
+                if (nested) return nested;
+            }
+        }
+        return null;
+    }
+    """
+
+    def __init__(self, tab: Any):
+        self._tab = tab
+
+    def status(self) -> Dict[str, Any]:
+        """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs."""
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+
+            const media = findMediaElement();
+            const session = navigator.mediaSession;
+            return {{
+                found: !!media,
+                paused: media ? media.paused : null,
+                currentTime: media ? media.currentTime : null,
+                duration: media ? media.duration : null,
+                volume: media ? media.volume : null,
+                muted: media ? media.muted : null,
+                title: session?.metadata?.title || document.title,
+                artist: session?.metadata?.artist || "",
+                album: session?.metadata?.album || "",
+                playbackState: session?.playbackState || (media ? (media.paused ? "paused" : "playing") : "none")
+            }};
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+    def toggle(self) -> Dict[str, Any]:
+        """Toggle play/pause on the active media element."""
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+            const media = findMediaElement();
+            if (!media) return {{success: false, error: "No media element found"}};
+            if (media.paused) {{
+                media.play();
+                return {{success: true, action: "played"}};
+            }} else {{
+                media.pause();
+                return {{success: true, action: "paused"}};
+            }}
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+    def play(self) -> Dict[str, Any]:
+        """Play active media element."""
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+            const v = findMediaElement();
+            if (v) {{ v.play(); return {{success: true}}; }}
+            return {{success: false, error: "No media element found"}};
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+    def pause(self) -> Dict[str, Any]:
+        """Pause active media element."""
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+            const v = findMediaElement();
+            if (v) {{ v.pause(); return {{success: true}}; }}
+            return {{success: false, error: "No media element found"}};
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+    def seek(self, seconds: float) -> Dict[str, Any]:
+        """Seek relative (+/- seconds) or absolute position."""
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+            const v = findMediaElement();
+            if (!v) return {{success: false, error: "No media element found"}};
+            v.currentTime += {float(seconds)};
+            return {{success: true, currentTime: v.currentTime}};
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+    def set_volume(self, volume: float) -> Dict[str, Any]:
+        """Set volume level between 0.0 and 1.0."""
+        volume = max(0.0, min(1.0, float(volume)))
+        js = f"""
+        (() => {{
+            {self._FIND_MEDIA_JS}
+            const v = findMediaElement();
+            if (v) {{ v.volume = {volume}; v.muted = false; return {{success: true, volume: v.volume}}; }}
+            return {{success: false, error: "No media element found"}};
+        }})()
+        """
+        return self._tab.eval_js(js) or {}
+
+
 class Tab:
     """Scoped browser tab handle and procedural action context."""
 
@@ -358,6 +473,7 @@ class Tab:
         self.title = title
         self.url = url
         self.active = active
+        self._media_controller: Optional[TabMedia] = None
 
     def __repr__(self) -> str:
         tab_id_repr = self.id if self.id is not None else "active"
@@ -379,6 +495,13 @@ class Tab:
                 self.active = True
                 return t
         return {"id": self.id, "title": self.title, "url": self.url, "active": self.active}
+
+    @property
+    def media(self) -> TabMedia:
+        """Fast-path media controller for HTML5 audio/video and MediaSession APIs."""
+        if self._media_controller is None:
+            self._media_controller = TabMedia(self)
+        return self._media_controller
 
     def activate(self) -> Dict[str, Any]:
         """Focus and switch to this tab."""
@@ -541,6 +664,10 @@ class Chrome(Tab):
     def tab(self, tab_id: int) -> Tab:
         """Get a scoped Tab handle by integer ID."""
         return Tab(tab_id=tab_id, client=self._client)
+
+    def get_tab(self, tab_id: int) -> Tab:
+        """Get a scoped Tab handle by integer ID (alias for tab(tab_id))."""
+        return self.tab(tab_id)
 
     def new_tab(self, url: str = "about:blank") -> Tab:
         """Create and return a new browser tab."""

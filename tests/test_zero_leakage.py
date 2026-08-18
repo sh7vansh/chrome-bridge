@@ -170,3 +170,26 @@ divide(10, 0)
     assert "ZeroDivisionError" in runtime_out
     assert "<repl>" in runtime_out
     assert_zero_leakage(runtime_out, "ZeroDivisionError output")
+
+
+def test_media_fastpath_zero_leakage():
+    mock_client = MagicMock()
+    mock_client.call.return_value = {
+        "found": True,
+        "paused": False,
+        "currentTime": 10.0,
+        "duration": 200.0,
+        "volume": 1.0,
+        "muted": False,
+        "title": "Song Title",
+        "artist": "Artist Name",
+        "playbackState": "playing",
+    }
+
+    mock_chrome = Chrome(client=mock_client)
+    session = PythonReplSession(globals_dict={"chrome": mock_chrome})
+
+    out = session.execute("chrome.media.status()")
+    assert "[result]" in out
+    assert "Song Title" in out
+    assert_zero_leakage(out, "chrome.media.status() output")

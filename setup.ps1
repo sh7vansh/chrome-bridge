@@ -123,16 +123,18 @@ if ($hasUv) {
         Write-Host "     Creating .venv with uv..." -ForegroundColor Gray
         uv venv .venv
     }
-    Write-Host "     Installing / syncing dependencies with uv..." -ForegroundColor Gray
+    Write-Host "     Installing / syncing dependencies with uv and registering package..." -ForegroundColor Gray
     uv pip install -r requirements.txt
+    uv pip install -e .
 } else {
     if (-not (Test-Path $venvDir)) {
         Write-Host "     Creating .venv with $pythonExe..." -ForegroundColor Gray
         & $pythonExe -m venv .venv
     }
     $pipExe = Join-Path $venvDir "Scripts\pip.exe"
-    Write-Host "     Installing dependencies with pip..." -ForegroundColor Gray
+    Write-Host "     Installing dependencies and registering package with pip..." -ForegroundColor Gray
     & $pipExe install -r requirements.txt --quiet
+    & $pipExe install -e . --quiet
 }
 
 if (Test-Path $venvPython) {

@@ -49,9 +49,10 @@ if command -v uv >/dev/null 2>&1; then
     else
         echo -e "  ${GREEN}✓${NC} Existing .venv directory found."
     fi
-    echo -e "  📥 Syncing dependencies from requirements.txt..."
+    echo -e "  📥 Syncing dependencies from requirements.txt and registering package..."
     source .venv/bin/activate
     uv pip install -r requirements.txt
+    uv pip install -e .
 elif command -v python3 >/dev/null 2>&1; then
     PY_VER="$(python3 --version)"
     echo -e "  ${GREEN}✓${NC} Python 3 detected: ${BOLD}${PY_VER}${NC}"
@@ -65,8 +66,9 @@ elif command -v python3 >/dev/null 2>&1; then
     fi
     if [ -f ".venv/bin/activate" ]; then
         source .venv/bin/activate
-        echo -e "  📥 Installing dependencies via pip..."
+        echo -e "  📥 Installing dependencies via pip and registering package..."
         pip install -r requirements.txt
+        pip install -e .
     fi
 else
     echo -e "  ${RED}✗ Error: Python 3.10+ is required for the REPL automation runtime.${NC}"
