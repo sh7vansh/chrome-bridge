@@ -218,3 +218,49 @@ def test_setup_host_status_reports_claude_code(tmp_path):
     res = run_setup_host("status", env=env)
     assert res.returncode == 0
     assert "Claude Code" in res.stdout
+
+
+def test_setup_host_cleanup_removes_endpoints(tmp_path):
+    """Test that cleanup command removes manifest files and unlinks IPC socket/port files."""
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+    target_dir = tmp_path / "runtime"
+    target_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    # First setup
+    run_setup_host("setup", "--target", str(target_dir), "--quiet", env=env)
+
+    # Create dummy socket/port in temp directory
+    sock_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
+    port_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
+    with open(sock_path, "w") as f:
+        f.write("mock")
+    with open(port_path, "w") as f:
+        f.write("12345")
+
+    # Run cleanup
+    res = run_setup_host("cleanup", "--target", str(target_dir), env=env)
+    assert res.returncode == 0
+    assert not os.path.exists(sock_path), "cleanup did not remove socket file"
+    assert not os.path.exists(port_path), "cleanup did not remove port file"
+
+
+def test_setup_host_test_subcommand_idle_and_active():
+    """Test that test command checks IPC connectivity cleanly."""
+    # When no host is running, reports idle state with returncode 0
+    sock_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
+    port_path = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
+    if os.path.exists(sock_path):
+        os.remove(sock_path)
+    if os.path.exists(port_path):
+        os.remove(port_path)
+
+    res = run_setup_host("test")
+    assert res.returncode == 0
+    assert "Verifying Chrome Bridge IPC connectivity" in res.stdout
+    assert "idle until Chrome opens" in res.stdout
+

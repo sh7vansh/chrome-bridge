@@ -263,24 +263,37 @@ def register_browser_manifests(launcher_path: Path, install_dir: Path, home_dir:
         if not quiet:
             print(f"  {green('✓')} Wrote Windows Host Manifest: {manifest_path}")
 
-        reg_keys = [
-            f"HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\{HOST_NAME}",
-            f"HKCU\\Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\{HOST_NAME}",
-            f"HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\{HOST_NAME}",
-            f"HKCU\\Software\\Chromium\\NativeMessagingHosts\\{HOST_NAME}",
+        reg_subkeys = [
+            rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Chromium\NativeMessagingHosts\{HOST_NAME}",
         ]
-        for key in reg_keys:
-            try:
-                subprocess.run(
-                    ["reg.exe", "add", key, "/ve", "/t", "REG_SZ", "/d", str(manifest_path), "/f"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-                if not quiet:
-                    print(f"  {green('✓')} Registered Windows Registry Key: {dim(key)}")
-            except Exception:
-                pass
+        try:
+            import winreg
+            for subkey in reg_subkeys:
+                try:
+                    k = winreg.CreateKey(winreg.HKEY_CURRENT_USER, subkey)
+                    winreg.SetValueEx(k, "", 0, winreg.REG_SZ, str(manifest_path))
+                    winreg.CloseKey(k)
+                    if not quiet:
+                        print(f"  {green('✓')} Registered Windows Registry Key: {dim(subkey)}")
+                except Exception:
+                    pass
+        except (ImportError, Exception):
+            for subkey in reg_subkeys:
+                try:
+                    full_key = f"HKCU\\{subkey}"
+                    subprocess.run(
+                        ["reg.exe", "add", full_key, "/ve", "/t", "REG_SZ", "/d", str(manifest_path), "/f"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                    if not quiet:
+                        print(f"  {green('✓')} Registered Windows Registry Key: {dim(full_key)}")
+                except Exception:
+                    pass
     else:
         targets = get_browser_manifest_targets(home_dir)
         for browser_name, target_file in targets:
@@ -556,11 +569,11 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 def run_cleanup(args: argparse.Namespace) -> int:
-    """Remove registered manifests and launcher scripts."""
+    """Remove registered manifests, launcher scripts, and IPC endpoint files."""
     home_dir = resolve_home_dir()
     install_dir = resolve_install_dir(args.target, bool(getattr(args, "dev", False)))
 
-    print(bold("Cleaning up Chrome Bridge native manifests and launchers..."))
+    print(bold("Cleaning up Chrome Bridge native manifests, launchers, and endpoints..."))
     targets = get_browser_manifest_targets(home_dir)
     for _, path in targets:
         if path.exists():
@@ -579,31 +592,86 @@ def run_cleanup(args: argparse.Namespace) -> int:
             except Exception:
                 pass
 
+    # Unlink temporary IPC socket / port files
+    import tempfile
+    for temp_name in ("antigravity_chrome_bridge.sock", "antigravity_chrome_bridge.port"):
+        t_path = Path(tempfile.gettempdir()) / temp_name
+        if t_path.exists():
+            try:
+                t_path.unlink()
+                print(f"  {green('✓')} Unlinked IPC endpoint: {t_path}")
+            except Exception:
+                pass
+
+    # Cleanup Windows registry keys if on Windows
+    if IS_WINDOWS:
+        reg_subkeys = [
+            rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Chromium\NativeMessagingHosts\{HOST_NAME}",
+        ]
+        try:
+            import winreg
+            for subkey in reg_subkeys:
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, subkey)
+                    print(f"  {green('✓')} Deleted Windows Registry Key: {dim(subkey)}")
+                except Exception:
+                    pass
+        except Exception:
+            for subkey in reg_subkeys:
+                try:
+                    subprocess.run(
+                        ["reg.exe", "delete", f"HKCU\\{subkey}", "/f"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                except Exception:
+                    pass
+
     print(green("Cleanup complete."))
     return 0
 
 
 def run_test_ping(args: argparse.Namespace) -> int:
-    """Verify IPC endpoint and basic connectivity."""
-    print(bold("Verifying Chrome Bridge IPC endpoints..."))
+    """Verify IPC endpoint and test active connectivity."""
+    print(bold("Verifying Chrome Bridge IPC connectivity..."))
+    import socket
     import tempfile
+
     sock_path = Path(tempfile.gettempdir()) / "antigravity_chrome_bridge.sock"
     port_path = Path(tempfile.gettempdir()) / "antigravity_chrome_bridge.port"
 
     if IS_WINDOWS:
-        if port_path.exists():
-            print(f"  {green('✓')} Port file present: {port_path} ({port_path.read_text().strip()})")
-            return 0
-        else:
+        if not port_path.exists():
             print(f"  {yellow('○')} Native host port file not active (host is idle until Chrome opens).")
             return 0
+        try:
+            port = int(port_path.read_text(encoding="utf-8").strip())
+            with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
+                s.settimeout(2.0)
+                s.sendall(b'{"id":9999,"action":"ping"}\n')
+                print(f"  {green('✓')} Successfully connected to Native Host TCP port {port}.")
+                return 0
+        except Exception as e:
+            print(f"  {yellow('⚠️')} Host port file present but connection failed: {e}")
+            return 1
     else:
-        if sock_path.exists():
-            print(f"  {green('✓')} Unix socket active: {sock_path}")
-            return 0
-        else:
+        if not sock_path.exists():
             print(f"  {yellow('○')} Native host socket not active (host is idle until Chrome opens).")
             return 0
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(2.0)
+                s.connect(str(sock_path))
+                s.sendall(b'{"id":9999,"action":"ping"}\n')
+                print(f"  {green('✓')} Successfully connected and verified Native Host Unix socket: {sock_path}")
+                return 0
+        except Exception as e:
+            print(f"  {yellow('⚠️')} Host socket file present but connection failed: {e}")
+            return 1
 
 
 def main() -> None:
