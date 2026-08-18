@@ -60,44 +60,52 @@ flowchart LR
 
 ---
 
-## Installation (2 Minutes)
+## Installation (Under 2 Minutes)
 
-### 1. Install Runtime & Register Native Host
+### 1. One-Command Setup (Recommended)
 
-Run the setup script for your operating system:
+Run the automated installer:
+
+```bash
+npx antigravity-chrome-bridge setup
+```
+
+This single command automatically:
+- Provisions the isolated Python runtime environment (`~/.chrome-bridge`).
+- Registers the Native Messaging Host manifest for Chrome, Chromium, Brave, and Edge.
+- Configures MCP servers for Claude Desktop, Cursor, and Antigravity.
+
+<details>
+<summary>Alternative: Install from source (for contributors)</summary>
 
 ```bash
 # macOS & Linux
 git clone https://github.com/sh7vansh/chrome-bridge.git && cd chrome-bridge && ./setup.sh
-```
 
-```powershell
 # Windows (PowerShell)
 git clone https://github.com/sh7vansh/chrome-bridge.git; cd chrome-bridge; .\setup.ps1
 ```
-
-```bash
-# Or via npx
-npx antigravity-chrome-bridge setup
-```
+</details>
 
 ### 2. Load Extension in Chrome
 
-1. Open Google Chrome and go to `chrome://extensions`.
+1. Open Google Chrome and navigate to `chrome://extensions`.
 2. Enable **Developer mode** using the toggle in the top-right corner.
-3. Click **Load unpacked** (top-left) and select the `extension/` directory inside this repository.
+3. Click **Load unpacked** (top-left) and select the extension directory:
+   - If installed via npx: `~/.chrome-bridge/extension`
+   - If installed from source: `chrome-bridge/extension`
 4. The Chrome Bridge icon in your browser toolbar will indicate a connected state.
 
 ### 3. Connect AI Clients (MCP)
 
-Add the server entry to your MCP client configuration (`claude_desktop_config.json`, Cursor MCP settings, or Antigravity):
+The setup command configures MCP automatically. If configuring an AI client manually, add the following to your MCP settings (`claude_desktop_config.json`, Cursor MCP, or Antigravity):
 
 ```json
 {
   "mcpServers": {
     "chrome-bridge": {
       "command": "python3",
-      "args": ["/path/to/chrome-bridge/mcp_server.py"]
+      "args": ["/home/YOUR_USERNAME/.chrome-bridge/mcp_server.py"]
     }
   }
 }
