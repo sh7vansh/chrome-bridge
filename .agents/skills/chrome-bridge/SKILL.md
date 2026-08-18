@@ -12,9 +12,9 @@ Chrome Bridge provides a stateful, persistent in-memory **Python REPL** layer to
 ## ⛔ Mandatory Execution Guardrails (Strict Compliance)
 
 1. **NO DISK SEARCHES:** NEVER call `find_by_name`, `grep_search`, or directory scans to locate `chrome_sdk` or `.chrome-bridge`. The installation is GUARANTEED to be at `~/.chrome-bridge`.
-2. **NO GLOBAL PYTHON:** NEVER invoke bare `python` or test global environment imports. ALWAYS execute scripts using the dedicated virtual environment:
+2. **NO GLOBAL PYTHON:** NEVER invoke bare `python` or test global environment imports. ALWAYS execute scripts using the dedicated virtual environment, `uv run`, or `uvx`:
    - **Windows:** `~/.chrome-bridge/.venv/Scripts/python.exe`
-   - **POSIX:** `~/.chrome-bridge/.venv/bin/python`
+   - **POSIX:** `~/.chrome-bridge/.venv/bin/python3`
    (or prepend the Zero-Config Bootstrap Preamble).
 3. **FAIL-FAST RULE:** If an import fails, DO NOT search the filesystem. Check `~/.chrome-bridge` directly.
 

@@ -29,34 +29,34 @@ SUPPORTS_COLOR = not os.environ.get("NO_COLOR") and (
 )
 
 
-def _c(code: str, text: str) -> str:
+def _colorize(code: str, text: str) -> str:
     if not SUPPORTS_COLOR:
         return text
     return f"\033[{code}m{text}\033[0m"
 
 
 def bold(text: str) -> str:
-    return _c("1", text)
+    return _colorize("1", text)
 
 
 def dim(text: str) -> str:
-    return _c("2", text)
+    return _colorize("2", text)
 
 
 def cyan(text: str) -> str:
-    return _c("36", text)
+    return _colorize("36", text)
 
 
 def green(text: str) -> str:
-    return _c("32", text)
+    return _colorize("32", text)
 
 
 def yellow(text: str) -> str:
-    return _c("33", text)
+    return _colorize("33", text)
 
 
 def red(text: str) -> str:
-    return _c("31", text)
+    return _colorize("31", text)
 
 
 def banner() -> None:
@@ -221,6 +221,8 @@ def get_browser_manifest_targets(home_dir: Path) -> List[Tuple[str, Path]]:
             ("Chromium", home_dir / ".config" / "chromium" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
             ("Brave Browser", home_dir / ".config" / "BraveSoftware" / "Brave-Browser" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
             ("Microsoft Edge", home_dir / ".config" / "microsoft-edge" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
+            ("Vivaldi", home_dir / ".config" / "vivaldi" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
+            ("Arc", home_dir / ".config" / "arc" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
             # Flatpak Linux
             ("Google Chrome (Flatpak)", home_dir / ".var" / "app" / "com.google.Chrome" / "config" / "google-chrome" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
             ("Chromium (Flatpak)", home_dir / ".var" / "app" / "org.chromium.Chromium" / "config" / "chromium" / "NativeMessagingHosts" / f"{HOST_NAME}.json"),
@@ -337,8 +339,8 @@ def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, qui
 def update_mcp_client_config(
     file_path: Path,
     client_name: str,
-    python_exec: str,
-    mcp_script: Path,
+    command: str,
+    args: List[str],
     quiet: bool = False,
 ) -> bool:
     """Non-destructively upsert chrome-bridge entry in an MCP client configuration file."""
@@ -360,8 +362,8 @@ def update_mcp_client_config(
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
         config["mcpServers"]["chrome-bridge"] = {
-            "command": python_exec,
-            "args": [str(mcp_script)],
+            "command": command,
+            "args": args,
         }
 
         file_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
@@ -378,17 +380,25 @@ def configure_all_mcp_clients(
     install_dir: Path,
     home_dir: Path,
     python_exec: str,
+    is_dev: bool = False,
     quiet: bool = False,
 ) -> None:
     """Update MCP configurations across Claude Code, Antigravity, Claude Desktop, and Cursor."""
-    mcp_script = (install_dir / "mcp_server.py").resolve()
+    if is_dev:
+        mcp_script = (install_dir / "mcp_server.py").resolve()
+        command = python_exec
+        args = [str(mcp_script)]
+    else:
+        command = "uvx"
+        args = ["antigravity-chrome-bridge", "mcp"]
 
     # Claude Code (~/.claude.json)
-    update_mcp_client_config(home_dir / ".claude.json", "Claude Code", python_exec, mcp_script, quiet)
+    update_mcp_client_config(home_dir / ".claude.json", "Claude Code", command, args, quiet)
 
-    # Antigravity Global & CLI
-    update_mcp_client_config(home_dir / ".agent" / "mcp_config.json", "Antigravity Global MCP", python_exec, mcp_script, quiet)
-    update_mcp_client_config(home_dir / ".gemini" / "antigravity-cli" / "mcp_config.json", "Antigravity CLI MCP", python_exec, mcp_script, quiet)
+    # Antigravity Global, Config & CLI
+    update_mcp_client_config(home_dir / ".agent" / "mcp_config.json", "Antigravity Global MCP", command, args, quiet)
+    update_mcp_client_config(home_dir / ".config" / "antigravity" / "mcp_config.json", "Antigravity Config MCP", command, args, quiet)
+    update_mcp_client_config(home_dir / ".gemini" / "antigravity-cli" / "mcp_config.json", "Antigravity CLI MCP", command, args, quiet)
 
     # Claude Desktop
     app_data = os.environ.get("APPDATA")
@@ -401,12 +411,12 @@ def configure_all_mcp_clients(
 
     for p in claude_desktop_paths:
         if p.parent.exists():
-            update_mcp_client_config(p, "Claude Desktop", python_exec, mcp_script, quiet)
+            update_mcp_client_config(p, "Claude Desktop", command, args, quiet)
 
     # Cursor
     cursor_dir = home_dir / ".cursor"
     if cursor_dir.exists():
-        update_mcp_client_config(cursor_dir / "mcp.json", "Cursor", python_exec, mcp_script, quiet)
+        update_mcp_client_config(cursor_dir / "mcp.json", "Cursor", command, args, quiet)
 
 
 def run_setup(args: argparse.Namespace) -> int:
@@ -447,7 +457,8 @@ def run_setup(args: argparse.Namespace) -> int:
 
     if not quiet:
         print(f"\n{bold(yellow('[5/5] Configuring Model Context Protocol (MCP) Clients...'))}")
-    configure_all_mcp_clients(install_dir, home_dir, python_exec, quiet)
+    is_dev = bool(getattr(args, "dev", False))
+    configure_all_mcp_clients(install_dir, home_dir, python_exec, is_dev=is_dev, quiet=quiet)
 
     if not quiet:
         print(f"""
@@ -521,6 +532,7 @@ def run_status(args: argparse.Namespace) -> int:
     mcp_clients = [
         ("Claude Code", home_dir / ".claude.json"),
         ("Antigravity Global", home_dir / ".agent" / "mcp_config.json"),
+        ("Antigravity Config", home_dir / ".config" / "antigravity" / "mcp_config.json"),
         ("Antigravity CLI", home_dir / ".gemini" / "antigravity-cli" / "mcp_config.json"),
         ("Claude Desktop", home_dir / ".config" / "Claude" / "claude_desktop_config.json"),
         ("Cursor", home_dir / ".cursor" / "mcp.json"),

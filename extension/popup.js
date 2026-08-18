@@ -269,6 +269,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Reconnecting Native Host Bridge...');
   });
 
+  // Copy 1-Step Setup Command
+  const copySetupCmdBtn = document.getElementById('copySetupCmdBtn');
+  if (copySetupCmdBtn) {
+    copySetupCmdBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText('uvx antigravity-chrome-bridge setup');
+        showToast('Copied setup command!');
+      } catch {
+        showToast('Could not copy automatically');
+      }
+    });
+  }
+
   // Copy Python Snippet
   copyPythonSnippetBtn.addEventListener('click', async () => {
     const pythonCode = `from chrome_sdk import chrome\n\n# Open or inspect active tab\nprint(chrome.url)\nprint(chrome.title)\n\n# Take snapshot or click elements\nsnapshot = chrome.snapshot()\n# chrome.click(1)\n`;

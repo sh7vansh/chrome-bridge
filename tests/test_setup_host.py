@@ -81,7 +81,7 @@ def test_skill_source_discovery_multi_root(tmp_path):
 
 
 def test_setup_host_configures_claude_code_json(tmp_path):
-    """Test that setup automatically creates and configures ~/.claude.json for Claude Code."""
+    """Test that setup automatically creates and configures ~/.claude.json for Claude Code using uvx."""
     runtime_dir = tmp_path / "runtime"
     home_dir = tmp_path / "fake_home"
     home_dir.mkdir()
@@ -98,7 +98,62 @@ def test_setup_host_configures_claude_code_json(tmp_path):
     data = json.loads(claude_json.read_text())
     assert "mcpServers" in data
     assert "chrome-bridge" in data["mcpServers"]
+    assert data["mcpServers"]["chrome-bridge"]["command"] == "uvx"
+    assert data["mcpServers"]["chrome-bridge"]["args"] == ["antigravity-chrome-bridge", "mcp"]
+
+
+def test_setup_host_configures_antigravity_config_dir(tmp_path):
+    """Test that setup configures ~/.config/antigravity/mcp_config.json alongside ~/.agent."""
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = run_setup_host("setup", "--quiet", env=env)
+    assert res.returncode == 0
+
+    dot_config_mcp = home_dir / ".config" / "antigravity" / "mcp_config.json"
+    assert dot_config_mcp.exists(), "~/.config/antigravity/mcp_config.json was not created"
+    data = json.loads(dot_config_mcp.read_text())
+    assert data["mcpServers"]["chrome-bridge"]["command"] == "uvx"
+
+
+def test_setup_host_dev_mode_configures_local_python_mcp(tmp_path):
+    """Test that --dev generates direct Python script invocation for local development."""
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = run_setup_host("setup", "--dev", "--quiet", env=env)
+    assert res.returncode == 0
+
+    claude_json = home_dir / ".claude.json"
+    data = json.loads(claude_json.read_text())
     assert data["mcpServers"]["chrome-bridge"]["args"][0].endswith("mcp_server.py")
+
+
+def test_browser_manifest_targets_includes_vivaldi_and_arc(tmp_path):
+    """Test that Linux manifest registration includes Vivaldi and Arc browser paths."""
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = run_setup_host("setup", "--quiet", env=env)
+    assert res.returncode == 0
+
+    if sys.platform.startswith("linux"):
+        vivaldi_manifest = home_dir / ".config" / "vivaldi" / "NativeMessagingHosts" / "com.chrome_bridge.native.json"
+        assert vivaldi_manifest.exists(), "Vivaldi manifest was not created"
+        arc_manifest = home_dir / ".config" / "arc" / "NativeMessagingHosts" / "com.chrome_bridge.native.json"
+        assert arc_manifest.exists(), "Arc manifest was not created"
 
 
 def test_setup_host_claude_code_non_destructive_merge(tmp_path):
