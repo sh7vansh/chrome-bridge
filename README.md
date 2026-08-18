@@ -9,7 +9,7 @@ Connect AI agents directly to your real, logged-in Google Chrome browser.
 
 Unlike Puppeteer or Playwright which launch isolated, empty browser instances, Chrome Bridge connects to your existing browser session:
 - **Live User Session:** Retains all cookies, logins, credentials, and active tab states (Gmail, GitHub, internal dashboards).
-- **Zero Open Ports:** Communicates exclusively over OS standard input/output (`stdio`) via Chrome Native Messaging. No local web servers or open network listeners.
+- **Native Messaging IPC:** Communicates directly with Chrome via standard Chrome Native Messaging and fast local IPC.
 - **99% Token Reduction:** Translates full DOM trees into compact text outlines with numbered interactive reference IDs (`[#1]`, `[#2]`).
 - **Stateful Python REPL:** Agents write procedural Python in a persistent runtime where state, variables, and tab bindings persist across turns.
 
