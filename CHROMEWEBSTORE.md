@@ -24,7 +24,7 @@ Key Capabilities:
 
 How It Works:
 1. Install the extension in Google Chrome.
-2. Run the companion setup command on your machine (`uvx antigravity-chrome-bridge setup`).
+2. Run the companion setup command on your machine (`uvx --refresh antigravity-chrome-bridge setup`).
 3. Add the MCP server configuration to your AI assistant.
 4. Your AI agent can now inspect and automate your browser sessions on demand.
 

@@ -65,7 +65,7 @@ flowchart LR
 ### Step 1: Run the Automated Setup
 
 ```bash
-uvx antigravity-chrome-bridge setup
+uvx --refresh antigravity-chrome-bridge setup
 ```
 
 This single command automatically:
@@ -102,7 +102,7 @@ If configuring a custom or manual MCP client:
   "mcpServers": {
     "chrome-bridge": {
       "command": "uvx",
-      "args": ["antigravity-chrome-bridge", "mcp"]
+      "args": ["--refresh", "antigravity-chrome-bridge", "mcp"]
     }
   }
 }

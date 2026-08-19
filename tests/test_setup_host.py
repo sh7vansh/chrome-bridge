@@ -99,7 +99,7 @@ def test_setup_host_configures_claude_code_json(tmp_path):
     assert "mcpServers" in data
     assert "chrome-bridge" in data["mcpServers"]
     assert data["mcpServers"]["chrome-bridge"]["command"] == "uvx"
-    assert data["mcpServers"]["chrome-bridge"]["args"] == ["antigravity-chrome-bridge", "mcp"]
+    assert data["mcpServers"]["chrome-bridge"]["args"] == ["--refresh", "antigravity-chrome-bridge", "mcp"]
 
 
 def test_setup_host_configures_antigravity_config_dir(tmp_path):
@@ -118,6 +118,7 @@ def test_setup_host_configures_antigravity_config_dir(tmp_path):
     assert dot_config_mcp.exists(), "~/.config/antigravity/mcp_config.json was not created"
     data = json.loads(dot_config_mcp.read_text())
     assert data["mcpServers"]["chrome-bridge"]["command"] == "uvx"
+    assert data["mcpServers"]["chrome-bridge"]["args"] == ["--refresh", "antigravity-chrome-bridge", "mcp"]
 
 
 def test_setup_host_dev_mode_configures_local_python_mcp(tmp_path):

@@ -764,7 +764,7 @@ def configure_all_mcp_clients(
         args = [str(mcp_script)]
     else:
         command = "uvx"
-        args = ["antigravity-chrome-bridge", "mcp"]
+        args = ["--refresh", "antigravity-chrome-bridge", "mcp"]
 
     # Claude Code (~/.claude.json)
     update_mcp_client_config(home_dir / ".claude.json", "Claude Code", command, args, quiet)
@@ -1095,7 +1095,7 @@ def repair_mcp_config(
 ) -> Tuple[bool, Optional[Path]]:
     """Safely create a timestamped backup and repair/upsert chrome-bridge MCP config."""
     if args is None:
-        args = ["antigravity-chrome-bridge", "mcp"]
+        args = ["--refresh", "antigravity-chrome-bridge", "mcp"]
 
     backup_path = None
     if file_path.exists():

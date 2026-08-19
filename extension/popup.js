@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (copySetupCmdBtn) {
     copySetupCmdBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText('uvx antigravity-chrome-bridge setup');
+        await navigator.clipboard.writeText('uvx --refresh antigravity-chrome-bridge setup');
         showToast('Copied setup command!');
       } catch {
         showToast('Could not copy automatically');
@@ -299,7 +299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       mcpServers: {
         "chrome-bridge": {
           "command": "uvx",
-          "args": ["antigravity-chrome-bridge", "mcp"]
+          "args": ["--refresh", "antigravity-chrome-bridge", "mcp"]
         }
       }
     };
