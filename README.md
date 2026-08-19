@@ -102,7 +102,7 @@ If configuring a custom or manual MCP client:
   "mcpServers": {
     "chrome-bridge": {
       "command": "uvx",
-      "args": ["--refresh", "antigravity-chrome-bridge", "mcp"]
+      "args": ["antigravity-chrome-bridge", "mcp"]
     }
   }
 }

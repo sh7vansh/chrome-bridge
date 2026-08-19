@@ -299,7 +299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       mcpServers: {
         "chrome-bridge": {
           "command": "uvx",
-          "args": ["--refresh", "antigravity-chrome-bridge", "mcp"]
+          "args": ["antigravity-chrome-bridge", "mcp"]
         }
       }
     };
