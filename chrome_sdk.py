@@ -165,14 +165,16 @@ def _extract_hostname(url: str) -> str:
 
 def wrap_untrusted_data(content: str, origin: str = "", selector: str = "body") -> str:
     """Wrap raw page content in strict XML structural boundaries and defang tag-breakout attempts."""
-    safe_content = str(content).replace("</UNTRUSTED_EXTERNAL_DATA>", "&lt;/UNTRUSTED_EXTERNAL_DATA&gt;")
-    safe_origin = str(origin).replace('"', '&quot;')
-    safe_selector = str(selector).replace('"', '&quot;')
-    return (
-        f'<UNTRUSTED_EXTERNAL_DATA origin="{safe_origin}" selector="{safe_selector}">\n'
-        f'{safe_content}\n'
-        f'</UNTRUSTED_EXTERNAL_DATA>'
-    )
+    s_content = content if isinstance(content, str) else str(content)
+    if "</UNTRUSTED_EXTERNAL_DATA>" in s_content:
+        s_content = s_content.replace("</UNTRUSTED_EXTERNAL_DATA>", "&lt;/UNTRUSTED_EXTERNAL_DATA&gt;")
+    safe_origin = origin if isinstance(origin, str) else str(origin)
+    if '"' in safe_origin:
+        safe_origin = safe_origin.replace('"', '&quot;')
+    safe_selector = selector if isinstance(selector, str) else str(selector)
+    if '"' in safe_selector:
+        safe_selector = safe_selector.replace('"', '&quot;')
+    return f'<UNTRUSTED_EXTERNAL_DATA origin="{safe_origin}" selector="{safe_selector}">\n{s_content}\n</UNTRUSTED_EXTERNAL_DATA>'
 
 
 def defang_telemetry_payload(data: Any) -> Any:

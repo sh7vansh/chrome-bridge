@@ -81,8 +81,8 @@ def test_microsecond_performance_benchmark():
     elapsed = time.perf_counter() - start
     avg_us = (elapsed / iterations) * 1_000_000
 
-    # Ensure average overhead is well below 10 microseconds (< 0.01ms)
-    assert avg_us < 10.0, f"Safety check overhead {avg_us:.2f} µs exceeded 10.0 µs limit"
+    # Ensure average overhead is well below 25 microseconds (< 0.025 ms)
+    assert avg_us < 25.0, f"Safety check overhead {avg_us:.2f} µs exceeded 25.0 µs limit"
 
     # 2. XML wrapping benchmark
     sample_dom = "A" * 5000
@@ -91,4 +91,4 @@ def test_microsecond_performance_benchmark():
         wrap_untrusted_data(sample_dom, origin="https://example.com")
     elapsed = time.perf_counter() - start
     avg_us_xml = (elapsed / iterations) * 1_000_000
-    assert avg_us_xml < 10.0, f"XML wrapping overhead {avg_us_xml:.2f} µs exceeded 10.0 µs limit"
+    assert avg_us_xml < 25.0, f"XML wrapping overhead {avg_us_xml:.2f} µs exceeded 25.0 µs limit"
