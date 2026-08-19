@@ -1,6 +1,6 @@
 ---
 name: chrome-bridge
-description: Control, inspect, and automate the user's live, active Google Chrome browser session. MANDATORY whenever the user asks to view open tabs, read active pages, click, fill forms, navigate, extract browser data, or run browser workflows. If Chrome is closed or unreachable, ask the user to open Chrome first. ALL interactions MUST be delegated to a dedicated worker subagent. NEVER use run_command in the parent context.
+description: Control, inspect, and automate the user's live, active Google Chrome browser session. MANDATORY whenever the user asks to view open tabs, read active pages, click, fill forms, navigate, extract browser data, or run browser workflows. ALL interactions MUST be delegated to a dedicated worker subagent. NEVER use run_command in the parent context.
 ---
 
 # Chrome Bridge (Python REPL Runtime & Dynamic Execution)
