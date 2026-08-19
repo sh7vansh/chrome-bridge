@@ -1,15 +1,19 @@
 ---
 name: chrome-bridge
-description: Control, inspect, and automate the user's live, active Google Chrome browser session via the stateful Python REPL runtime. MANDATORY whenever the user asks to view open tabs, read active pages, click, fill forms, navigate, extract browser data, or run browser workflows. Dynamically executes simple actions inline and delegates complex multi-step workflows to a dedicated chrome_worker subagent.
+description: Control, inspect, and automate the user's live, active Google Chrome browser session. MANDATORY whenever the user asks to view open tabs, read active pages, click, fill forms, navigate, extract browser data, or run browser workflows. ALL interactions MUST be delegated to a dedicated worker subagent. NEVER use run_command in the parent context.
 ---
 
 # Chrome Bridge (Python REPL Runtime & Dynamic Execution)
 
-Chrome Bridge provides a stateful, persistent in-memory **Python REPL** layer to control the user's active Google Chrome browser in real-time.
+## 1. Mandatory Execution Guardrails (Strict Compliance)
 
----
+> [!CAUTION]
+> **CRITICAL ARCHITECTURE DIRECTIVE: SUBAGENTS ONLY**
+> You are strictly forbidden from writing Python scripts to `scratch/` and executing them via `run_command` for browser tasks.
+> 1. If the `chrome_worker` subagent does not exist in your available subagents list, you MUST first create it using `define_subagent`.
+> 2. You MUST use `invoke_subagent` to execute all browser tasks.
 
-## ⛔ Mandatory Execution Guardrails (Strict Compliance)
+Additionally, the following rules apply to the execution environment:
 
 1. **NO DISK SEARCHES:** NEVER call `find_by_name`, `grep_search`, or directory scans to locate `chrome_sdk` or `.chrome-bridge`. The installation is GUARANTEED to be at `~/.chrome-bridge`.
 2. **NO GLOBAL PYTHON:** NEVER invoke bare `python` or test global environment imports. ALWAYS execute scripts using the dedicated virtual environment, `uv run`, or `uvx`:
@@ -20,11 +24,11 @@ Chrome Bridge provides a stateful, persistent in-memory **Python REPL** layer to
 
 ---
 
-## 🚦 Dual-Route Orchestration & Worker Lifecycle Protocol
+## 2. Dual-Route Orchestration & Worker Lifecycle Protocol
 
 To keep the parent conversation context clean and protect token limits from large DOM snapshots, **ALL browser tasks must be executed via a dedicated worker subagent.**
 
-### 1. Warm Worker Reuse (`send_message`)
+### Warm Worker Reuse (`send_message`)
 The parent agent tracks `(active_worker_id, turn_count, cached_state)` in its context:
 - **Initial / Cold Turn:** Spawn a worker subagent with `invoke_subagent` and capture `conversationID`.
 - **Continuation Turns (Turns 2–6):** Reuse the warm worker via `send_message(Recipient=active_worker_id, Message=...)` to eliminate cold-start re-imports and prompt bloat.
@@ -32,7 +36,10 @@ The parent agent tracks `(active_worker_id, turn_count, cached_state)` in its co
 - **Heavy Workload Isolation:** High-token scraping or multi-page crawling tasks bypass the warm pool; spawn a dedicated fresh subagent and terminate it immediately after.
 - **Fault Recovery:** If `send_message` errors or times out, immediately kill the worker and initialize a fresh subagent with `cached_state`.
 
-### 2. Lean State Handover Schema & Telemetry Contract
+---
+
+## 3. Lean State Handover Schema & Telemetry Contract
+
 When spawning a fresh worker (or resetting workers post-recycle), inject the standardized 5-line markdown context header into the prompt:
 
 ```markdown
@@ -64,7 +71,7 @@ When spawning a fresh worker (or resetting workers post-recycle), inject the sta
 
 ---
 
-## 🛡️ Zero-Latency Security Architecture & Prompt Injection Defense
+## 4. Zero-Latency Security Architecture & Prompt Injection Defense
 
 All web interactions are secured via a **5-Layer Defense-in-Depth Pipeline** operating with zero LLM roundtrip latency (< 0.01ms overhead):
 
@@ -88,7 +95,7 @@ All web interactions are secured via a **5-Layer Defense-in-Depth Pipeline** ope
 
 ---
 
-## 🚀 Zero-Config SDK Bootstrap Preamble
+## 5. Zero-Config SDK Bootstrap Preamble
 
 Subagents and worker scripts execute with the standard import preamble:
 
@@ -114,10 +121,9 @@ for p in [os.getcwd(), os.path.expanduser("~/.chrome-bridge"), os.path.expanduse
 from chrome_sdk import chrome
 ```
 
-
 ---
 
-## 🛠️ Python API Reference
+## 6. Python API Reference
 
 ```python
 import chrome_sdk
