@@ -77,7 +77,7 @@ def test_skill_source_discovery_multi_root(tmp_path):
 
     res = run_setup_host("setup", "--target", str(tmp_path))
     assert res.returncode == 0
-    assert "Resolved skill source" in res.stdout
+    assert "Agent skill deployed" in res.stdout
 
 
 def test_setup_host_configures_claude_code_json(tmp_path):

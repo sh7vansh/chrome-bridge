@@ -674,7 +674,7 @@ def register_browser_manifests(launcher_path: Path, install_dir: Path, home_dir:
                 pass
 
 
-def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, quiet: bool = False) -> None:
+def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, quiet: bool = False) -> Optional[Path]:
     """Discover and install SKILL.md into global and local agent skill paths."""
     candidates = [
         install_dir / ".agents" / "skills" / "chrome-bridge" / "SKILL.md",
@@ -694,7 +694,7 @@ def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, qui
     if not skill_source:
         if not quiet:
             print(f"  {yellow('⚠️ Skill file not found across candidate paths. Skipping skill copy.')}")
-        return
+        return None
 
     if not quiet:
         print(f"  {cyan('↳ Resolved skill source:')} {skill_source}")
@@ -718,6 +718,8 @@ def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, qui
         except Exception as err:
             if not quiet:
                 print(f"  {yellow(f'⚠️ Could not install skill to {dest_dir}:')} {err}")
+
+    return skill_source
 
 
 def update_mcp_client_config(
@@ -859,8 +861,11 @@ def run_setup(args: argparse.Namespace) -> int:
 
     # Step 4: Install Agent Skill
     with ui.spinner("Installing Agent Skill (chrome-bridge)...") as sp:
-        install_agent_skill(install_dir, source_dir, home_dir, quiet=quiet)
-        sp.ok("Agent skill deployed to Antigravity, Gemini, Codex & Pi config directories")
+        skill_src = install_agent_skill(install_dir, source_dir, home_dir, quiet=True)
+        if skill_src:
+            sp.ok(f"Agent skill deployed to agent directories (source: {skill_src})")
+        else:
+            sp.warn("Agent skill source file (SKILL.md) not found across candidate paths")
 
     # Step 5: Configure MCP Clients
     with ui.spinner("Configuring AI Agent Model Context Protocol (MCP) clients...") as sp:
