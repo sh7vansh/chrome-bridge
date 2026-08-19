@@ -3,7 +3,7 @@
 
 Standard library only. Manages cross-platform native messaging manifest registration,
 launcher wrapper scripts, agent skill deployment, and MCP client configurations
-(Claude Code, Antigravity, Cursor, Claude Desktop).
+(Claude Code, Antigravity, Cursor, Claude Desktop, Codex, Pi Code).
 """
 
 import argparse
@@ -576,6 +576,10 @@ def detect_mcp_clients(home_dir: Path) -> List[MCPClientInfo]:
         ("Cursor", home_dir / ".cursor" / "mcp.json"),
         ("Windsurf", home_dir / ".codeium" / "windsurf" / "mcp_config.json"),
         ("Zed", home_dir / ".config" / "zed" / "settings.json"),
+        ("Codex CLI", home_dir / ".codex" / "config.json"),
+        ("Codex MCP", home_dir / ".codex" / "mcp.json"),
+        ("Pi Code", home_dir / ".pi" / "mcp.json"),
+        ("Pi Agent", home_dir / ".pi" / "agent" / "mcp.json"),
     ]
     if IS_MAC:
         client_defs.append(("Claude Desktop (macOS)", home_dir / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"))
@@ -584,7 +588,10 @@ def detect_mcp_clients(home_dir: Path) -> List[MCPClientInfo]:
 
     results: List[MCPClientInfo] = []
     for name, path in client_defs:
-        is_present = path.exists() or path.parent.exists()
+        if name in ("Codex MCP", "Pi Agent"):
+            is_present = path.exists()
+        else:
+            is_present = path.exists() or path.parent.exists()
         is_conf = False
         if path.exists():
             try:
@@ -697,6 +704,9 @@ def install_agent_skill(install_dir: Path, source_dir: Path, home_dir: Path, qui
         ("Antigravity Global Agent (.agent)", home_dir / ".agent" / "skills" / "chrome-bridge"),
         ("Gemini CLI Agent", home_dir / ".gemini" / "antigravity-cli" / "skills" / "chrome-bridge"),
         ("Gemini Config Skills", home_dir / ".gemini" / "config" / "skills" / "chrome-bridge"),
+        ("Codex Global Skill", home_dir / ".codex" / "skills" / "chrome-bridge"),
+        ("Pi Code Global Skill", home_dir / ".pi" / "skills" / "chrome-bridge"),
+        ("Pi Agent Global Skill", home_dir / ".pi" / "agent" / "skills" / "chrome-bridge"),
     ]
 
     for label, dest_dir in dest_dirs:
@@ -716,18 +726,25 @@ def update_mcp_client_config(
     command: str,
     args: List[str],
     quiet: bool = False,
+    schema_key: Optional[str] = None,
 ) -> bool:
     """Non-destructively upsert chrome-bridge entry in an MCP client configuration file."""
     try:
-        config: Dict[str, Any] = {"mcpServers": {}}
+        key = schema_key or "mcpServers"
+        config: Dict[str, Any] = {key: {}}
         if file_path.exists():
             try:
                 raw = file_path.read_text(encoding="utf-8")
                 loaded = json.loads(raw)
                 if isinstance(loaded, dict):
                     config = loaded
-                if "mcpServers" not in config or not isinstance(config["mcpServers"], dict):
-                    config["mcpServers"] = {}
+                if not schema_key:
+                    if "mcp_servers" in config and isinstance(config["mcp_servers"], dict):
+                        key = "mcp_servers"
+                    elif "mcpServers" in config and isinstance(config["mcpServers"], dict):
+                        key = "mcpServers"
+                if key not in config or not isinstance(config[key], dict):
+                    config[key] = {}
             except Exception:
                 if not quiet:
                     print(f"  {yellow(f'⚠️ Could not parse JSON in {file_path}, skipping...')}")
@@ -735,7 +752,7 @@ def update_mcp_client_config(
         else:
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        config["mcpServers"]["chrome-bridge"] = {
+        config[key]["chrome-bridge"] = {
             "command": command,
             "args": args,
         }
@@ -757,7 +774,7 @@ def configure_all_mcp_clients(
     is_dev: bool = False,
     quiet: bool = False,
 ) -> None:
-    """Update MCP configurations across Claude Code, Antigravity, Claude Desktop, and Cursor."""
+    """Update MCP configurations across Claude Code, Antigravity, Claude Desktop, Cursor, Codex, and Pi Code."""
     if is_dev:
         mcp_script = (install_dir / "mcp_server.py").resolve()
         command = python_exec
@@ -791,6 +808,18 @@ def configure_all_mcp_clients(
     cursor_dir = home_dir / ".cursor"
     if cursor_dir.exists():
         update_mcp_client_config(cursor_dir / "mcp.json", "Cursor", command, args, quiet)
+
+    # Codex CLI (~/.codex/config.json & ~/.codex/mcp.json)
+    codex_dir = home_dir / ".codex"
+    update_mcp_client_config(codex_dir / "config.json", "Codex CLI", command, args, quiet, schema_key="mcp_servers")
+    if (codex_dir / "mcp.json").exists():
+        update_mcp_client_config(codex_dir / "mcp.json", "Codex MCP", command, args, quiet)
+
+    # Pi Code (~/.pi/mcp.json & ~/.pi/agent/mcp.json)
+    pi_dir = home_dir / ".pi"
+    update_mcp_client_config(pi_dir / "mcp.json", "Pi Code", command, args, quiet)
+    if (pi_dir / "agent").exists():
+        update_mcp_client_config(pi_dir / "agent" / "mcp.json", "Pi Agent", command, args, quiet)
 
 
 def run_setup(args: argparse.Namespace) -> int:
@@ -831,7 +860,7 @@ def run_setup(args: argparse.Namespace) -> int:
     # Step 4: Install Agent Skill
     with ui.spinner("Installing Agent Skill (chrome-bridge)...") as sp:
         install_agent_skill(install_dir, source_dir, home_dir, quiet=quiet)
-        sp.ok("Agent skill deployed to Antigravity & Gemini config directories")
+        sp.ok("Agent skill deployed to Antigravity, Gemini, Codex & Pi config directories")
 
     # Step 5: Configure MCP Clients
     with ui.spinner("Configuring AI Agent Model Context Protocol (MCP) clients...") as sp:

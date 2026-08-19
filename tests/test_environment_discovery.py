@@ -72,6 +72,15 @@ def test_detect_mcp_clients(tmp_path):
     cursor_dir = home_dir / ".cursor"
     cursor_dir.mkdir()
 
+    # Create codex dir with config.json
+    codex_dir = home_dir / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.json").write_text('{"mcpServers": {"chrome-bridge": {"command": "uvx"}}}')
+
+    # Create pi dir
+    pi_dir = home_dir / ".pi"
+    pi_dir.mkdir()
+
     clients = detect_mcp_clients(home_dir)
     claude_client = next(c for c in clients if c.name == "Claude Code")
     assert claude_client.is_present is True
@@ -80,3 +89,27 @@ def test_detect_mcp_clients(tmp_path):
     cursor_client = next(c for c in clients if c.name == "Cursor")
     assert cursor_client.is_present is True
     assert cursor_client.is_configured is False
+
+    codex_client = next(c for c in clients if c.name == "Codex CLI")
+    assert codex_client.is_present is True
+    assert codex_client.is_configured is True
+
+    pi_client = next(c for c in clients if c.name == "Pi Code")
+    assert pi_client.is_present is True
+    assert pi_client.is_configured is False
+
+
+def test_detect_mcp_clients_exact_file_presence(tmp_path):
+    """Test that mcp clients report is_present=False if neither file nor distinct agent dir exists."""
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+
+    # .codex directory exists, but mcp.json does not exist
+    codex_dir = home_dir / ".codex"
+    codex_dir.mkdir()
+
+    clients = detect_mcp_clients(home_dir)
+    codex_mcp = next(c for c in clients if c.name == "Codex MCP")
+    # mcp.json does not exist, so Codex MCP should report is_present=False
+    assert codex_mcp.is_present is False
+

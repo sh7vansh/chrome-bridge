@@ -71,7 +71,7 @@ uvx --refresh antigravity-chrome-bridge setup
 This single command automatically:
 - Provisions the isolated Python runtime (`~/.chrome-bridge`).
 - Registers the Native Messaging Host for Chrome, Brave, and Edge across Linux, macOS, and Windows.
-- Automatically configures MCP servers for **Claude Code**, **Claude Desktop**, **Cursor**, and **Antigravity CLI**.
+- Automatically configures MCP servers and skills for **Claude Code**, **Claude Desktop**, **Cursor**, **Antigravity CLI**, **Codex CLI**, and **Pi Code**.
 
 <details>
 <summary>Alternative: Install from source (for contributors)</summary>
@@ -108,6 +108,32 @@ If configuring a custom or manual MCP client:
 }
 ```
 </details>
+
+---
+
+## CLI Commands & Diagnostics
+
+Chrome Bridge includes pure-Python CLI utilities accessible directly via `uvx`:
+
+| Command | Description |
+| :--- | :--- |
+| `uvx antigravity-chrome-bridge setup` | Runs full setup, registers native host manifests, and auto-patches MCP configs |
+| `uvx antigravity-chrome-bridge doctor` | Audits runtime environment, manifests, and socket health (`--fix` to auto-repair) |
+| `uvx antigravity-chrome-bridge status` | Checks native host IPC port and socket listener status |
+| `uvx antigravity-chrome-bridge simulate` | Simulates native messaging stdio handshake end-to-end without Chrome running |
+| `uvx antigravity-chrome-bridge cleanup` | Removes manifest registrations, launcher scripts, and socket files |
+
+### Diagnostics & Self-Healing
+
+If you encounter connection issues between your agent and Chrome:
+
+```bash
+# Run self-healing diagnostics and auto-repair broken manifests or permissions
+uvx antigravity-chrome-bridge doctor --fix
+
+# Check IPC socket and listener status
+uvx antigravity-chrome-bridge status
+```
 
 ---
 

@@ -315,3 +315,59 @@ def test_setup_host_test_subcommand_idle_and_active():
     assert "Verifying Chrome Bridge IPC connectivity" in res.stdout
     assert "idle until Chrome opens" in res.stdout
 
+
+def test_setup_host_configures_codex_and_pi_code(tmp_path):
+    """Test that setup configures Codex CLI and Pi Code MCP JSON and skill directories."""
+    runtime_dir = tmp_path / "runtime"
+    home_dir = tmp_path / "fake_home"
+    home_dir.mkdir()
+
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["USERPROFILE"] = str(home_dir)
+
+    res = run_setup_host("setup", "--target", str(runtime_dir), "--quiet", env=env)
+    assert res.returncode == 0, f"setup_host failed: {res.stderr}\n{res.stdout}"
+
+    codex_dir = home_dir / ".codex"
+    pi_dir = home_dir / ".pi"
+
+    # Verify Codex MCP config using snake_case mcp_servers
+    codex_config = codex_dir / "config.json"
+    assert codex_config.exists(), "~/.codex/config.json was not created"
+    data = json.loads(codex_config.read_text())
+    assert "chrome-bridge" in data.get("mcp_servers", {})
+
+    # Verify Pi Code MCP config
+    pi_config = pi_dir / "mcp.json"
+    assert pi_config.exists(), "~/.pi/mcp.json was not created"
+    data_pi = json.loads(pi_config.read_text())
+    assert "chrome-bridge" in data_pi.get("mcpServers", {})
+
+    # Verify skill paths created
+    assert (codex_dir / "skills" / "chrome-bridge" / "SKILL.md").exists()
+    assert (pi_dir / "skills" / "chrome-bridge" / "SKILL.md").exists()
+
+
+def test_update_mcp_client_config_supports_snake_case_mcp_servers(tmp_path):
+    """Test that update_mcp_client_config respects snake_case mcp_servers for Codex CLI."""
+    from setup_host import update_mcp_client_config
+
+    config_file = tmp_path / "codex_config.json"
+    # Pre-existing config with mcp_servers key
+    config_file.write_text('{\n  "mcp_servers": {}\n}\n')
+
+    res = update_mcp_client_config(
+        config_file,
+        "Codex CLI",
+        "uvx",
+        ["antigravity-chrome-bridge", "mcp"],
+        schema_key="mcp_servers",
+    )
+    assert res is True
+    data = json.loads(config_file.read_text())
+    assert "mcp_servers" in data
+    assert "chrome-bridge" in data["mcp_servers"]
+
+
+
