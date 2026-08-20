@@ -5,13 +5,42 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](pyproject.toml)
 [![Chrome MV3](https://img.shields.io/badge/Chrome-MV3-blue)](extension/manifest.json)
 
-Connect AI agents directly to your real, logged-in Google Chrome browser.
+**Connect AI agents directly to your real, logged-in Google Chrome browser.**
 
-Unlike Puppeteer or Playwright which launch isolated, empty browser instances, Chrome Bridge connects to your existing browser session:
-- **Live User Session:** Retains all cookies, logins, credentials, and active tab states (Gmail, GitHub, internal dashboards).
-- **Native Messaging IPC:** Communicates directly with Chrome via standard Chrome Native Messaging and fast local IPC.
-- **99% Token Reduction:** Translates full DOM trees into compact text outlines with numbered interactive reference IDs (`[#1]`, `[#2]`).
-- **Stateful Python REPL:** Agents write procedural Python in a persistent runtime where state, variables, and tab bindings persist across turns.
+Chrome Bridge gives AI agents a persistent programming interface to an existing
+Chrome session instead of launching a separate, empty automation browser.
+
+- **Live User Session:** Work with the browser you already use, including its
+  current tabs, cookies, authentication state, and logged-in applications.
+- **Native Messaging IPC:** Connects the Python runtime to Chrome through
+  Chrome Native Messaging and local IPC.
+- **Compact Page Representation:** Converts large DOM structures into compact
+  semantic outlines with numbered interactive references such as `[#1]` and
+  `[#2]`, reducing the amount of page context an agent needs to process.
+- **Stateful Python REPL:** Agents can execute procedural Python in a persistent
+  runtime where variables, objects, and tab bindings survive across actions.
+- **Agent-Friendly API:** Exposes browser interaction through Python and MCP,
+  making it usable from coding agents and other MCP-compatible clients.
+
+---
+
+## Why Chrome Bridge?
+
+Browser agents typically have two choices:
+
+1. Launch an isolated automation browser and lose the user's existing browser
+   state.
+2. Interact with a real browser through tooling that repeatedly rediscovers
+   page state and has limited persistence between actions.
+
+Chrome Bridge takes a different approach:
+
+> **Connect the agent to the browser the user is already using, and give it a
+> persistent programming environment for multi-step work.**
+
+The browser remains a real Chrome session while the agent gets a compact,
+stateful interface for inspecting pages, interacting with elements, managing
+tabs, and executing browser workflows.
 
 ---
 
@@ -20,82 +49,109 @@ Unlike Puppeteer or Playwright which launch isolated, empty browser instances, C
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Agent as AI Agent (Claude Code / Cursor / Claude Desktop / Antigravity)
+    actor Agent as AI Agent
     participant REPL as Python Runtime (chrome_sdk)
-    participant Host as Native Host (stdio IPC)
+    participant Host as Native Host
     participant Ext as Chrome MV3 Extension
-    participant Tab as Live Chrome Tab (DOM & Shadow DOM)
+    participant Tab as Live Chrome Tab
 
     Agent->>REPL: execute_python("chrome.click(14)")
-    Note over REPL: Resolves active tab & serializes JSON packet
-    REPL->>Host: JSON message via length-prefixed stdio
-    Host->>Ext: Chrome Native Messaging port
-    Ext->>Tab: Dispatches trusted event / queries Shadow DOM
-    Tab-->>Ext: Element updated / DOM mutated
-    Ext-->>Host: Action ack & distilled Ref-ID delta
-    Host-->>REPL: stdio response stream
-    REPL-->>Agent: Action return value / refreshed snapshot outline
+    Note over REPL: Resolves tab & serializes request
+    REPL->>Host: JSON via length-prefixed stdio
+    Host->>Ext: Chrome Native Messaging
+    Ext->>Tab: Dispatch action / query DOM
+    Tab-->>Ext: Result / DOM update
+    Ext-->>Host: Response
+    Host-->>REPL: IPC response
+    REPL-->>Agent: Result / refreshed snapshot
 ```
 
 ```mermaid
 flowchart LR
     subgraph ClientLayer ["AI & Client Runtime"]
-        A["AI Agent<br/>(Claude Code / Cursor / Claude Desktop / Antigravity)"]
+        A["AI Agent"]
         B["Python REPL Runtime<br/>(chrome_sdk)"]
         A -->|"execute_python(code)"| B
     end
 
     subgraph NativeBridge ["OS Native Bridge"]
-        C["Native Messaging Host<br/>(native_host.py / stdio)"]
+        C["Native Messaging Host<br/>(stdio IPC)"]
         B -->|"Length-prefixed stdio"| C
     end
 
-    subgraph BrowserEngine ["Chrome Browser (Live Session)"]
+    subgraph BrowserEngine ["Chrome Browser"]
         D["MV3 Extension Service Worker"]
         E["Active Tab & Content Scripts<br/>(DOM, Shadow DOM, Ref-IDs)"]
-        C -->|"Native Messaging Port"| D
+        C -->|"Native Messaging"| D
         D -->|"chrome.tabs / scripting"| E
     end
 ```
 
 ---
 
-## Installation (2 Steps)
+## Installation
 
-### Step 1: Run the Automated Setup
+### 1. Install Chrome Bridge
 
 ```bash
 uvx --refresh antigravity-chrome-bridge setup
 ```
 
-This single command automatically:
-- Provisions the isolated Python runtime (`~/.chrome-bridge`).
-- Registers the Native Messaging Host for Chrome, Brave, and Edge across Linux, macOS, and Windows.
-- Automatically configures MCP servers and skills for **Claude Code**, **Claude Desktop**, **Cursor**, **Antigravity CLI**, **Codex CLI**, and **Pi Code**.
+The setup command provisions the local runtime, registers the Native Messaging
+Host, and configures supported agent integrations.
+
+Supported integrations include:
+
+- Claude Code
+- Claude Desktop
+- Cursor
+- Antigravity CLI
+- Codex CLI
+- Pi Code
+
+The installer supports macOS, Linux, and Windows.
 
 <details>
-<summary>Alternative: Install from source (for contributors)</summary>
+<summary>Alternative: install from source</summary>
+
+### macOS & Linux
 
 ```bash
-# macOS & Linux
-git clone https://github.com/sh7vansh/chrome-bridge.git && cd chrome-bridge && ./setup.sh
-
-# Windows (PowerShell)
-git clone https://github.com/sh7vansh/chrome-bridge.git; cd chrome-bridge; .\setup.ps1
+git clone https://github.com/sh7vansh/chrome-bridge.git
+cd chrome-bridge
+./setup.sh
 ```
+
+### Windows
+
+```powershell
+git clone https://github.com/sh7vansh/chrome-bridge.git
+cd chrome-bridge
+.\setup.ps1
+```
+
 </details>
 
-### Step 2: Load the Extension in Chrome
+### 2. Load the Chrome Extension
 
-1. Open Google Chrome and navigate to `chrome://extensions`.
-2. Enable **Developer mode** using the toggle in the top-right corner.
-3. Click **Load unpacked** (top-left) and select `~/.chrome-bridge/extension` (or `chrome-bridge/extension` if installed from source).
-4. You're done! The Chrome Bridge icon in your toolbar will show connected status.
+1. Open `chrome://extensions` in Chrome.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select:
+
+```text
+~/.chrome-bridge/extension
+```
+
+or the `extension/` directory when running from source.
+
+Once loaded, the Chrome Bridge extension will display its connection status in
+the toolbar.
 
 <details>
-<summary>Manual MCP Configuration Reference (Optional)</summary>
+<summary>Manual MCP configuration</summary>
 
-If configuring a custom or manual MCP client:
+For an MCP-compatible client that requires manual configuration:
 
 ```json
 {
@@ -107,100 +163,198 @@ If configuring a custom or manual MCP client:
   }
 }
 ```
+
 </details>
 
 ---
 
-## CLI Commands & Diagnostics
+## CLI & Diagnostics
 
-Chrome Bridge includes pure-Python CLI utilities accessible directly via `uvx`:
+Chrome Bridge includes CLI utilities for installation, diagnostics, health
+checks, simulation, and cleanup.
 
 | Command | Description |
 | :--- | :--- |
-| `uvx antigravity-chrome-bridge setup` | Runs full setup, registers native host manifests, and auto-patches MCP configs |
-| `uvx antigravity-chrome-bridge doctor` | Audits runtime environment, manifests, and socket health (`--fix` to auto-repair) |
-| `uvx antigravity-chrome-bridge status` | Checks native host IPC port and socket listener status |
-| `uvx antigravity-chrome-bridge simulate` | Simulates native messaging stdio handshake end-to-end without Chrome running |
-| `uvx antigravity-chrome-bridge cleanup` | Removes manifest registrations, launcher scripts, and socket files |
+| `uvx antigravity-chrome-bridge setup` | Install and configure Chrome Bridge |
+| `uvx antigravity-chrome-bridge doctor` | Inspect runtime, manifests, and connectivity |
+| `uvx antigravity-chrome-bridge doctor --fix` | Attempt automatic repair of detected issues |
+| `uvx antigravity-chrome-bridge status` | Check native host and IPC status |
+| `uvx antigravity-chrome-bridge simulate` | Simulate the native messaging handshake without Chrome |
+| `uvx antigravity-chrome-bridge cleanup` | Remove Chrome Bridge registrations and local runtime artifacts |
 
-### Diagnostics & Self-Healing
+### Self-healing diagnostics
 
-If you encounter connection issues between your agent and Chrome:
+When troubleshooting:
 
 ```bash
-# Run self-healing diagnostics and auto-repair broken manifests or permissions
 uvx antigravity-chrome-bridge doctor --fix
-
-# Check IPC socket and listener status
 uvx antigravity-chrome-bridge status
 ```
 
+The goal is to make the bridge diagnosable instead of requiring users to
+manually inspect native messaging manifests, permissions, and IPC state.
+
 ---
 
-## Python SDK Quick Reference
+## Python SDK
 
-The synchronous `chrome` client is ready to use directly in Python scripts and agent REPL sessions:
+The synchronous `chrome` client can be used directly from Python scripts or
+from an agent's persistent Python runtime.
 
 ```python
 from chrome_sdk import chrome
 
-# Inspect current page structure with numbered Ref-IDs
+# Inspect the current page
 print(chrome.snapshot())
 
-# Click button or link by element ID
+# Click an element by Ref-ID
 chrome.click(12)
 
-# Type into input field and submit
+# Type into an input and press Enter
 chrome.type(3, "Search query", press_enter=True)
 
-# Select dropdown option
+# Select a dropdown option
 chrome.select(5, "option_value")
 
-# Multimedia fast-path (Shadow-DOM & audio/video)
+# Control HTML5 media
 chrome.media.play_pause()
 chrome.media.seek(30)
 
-# Tab management
+# Open and inspect another tab
 tab = chrome.new_tab("https://github.com")
 print(chrome.tabs)
 ```
 
-### Core API Methods
+### Core API
 
 | Method | Syntax | Description |
 | :--- | :--- | :--- |
-| `snapshot` | `chrome.snapshot()` | Returns a distilled text outline of interactive elements with `[#id]` references |
-| `click` | `chrome.click(id)` | Dispatches a click event to the target Ref-ID or CSS selector |
-| `type` | `chrome.type(id, text, press_enter=False)` | Focuses target input and inputs text with optional Enter keypress |
-| `select` | `chrome.select(id, value)` | Chooses an option in a `<select>` dropdown |
-| `hover` | `chrome.hover(id)` | Triggers mouse hover state on target element |
-| `scroll` | `chrome.scroll(x=0, y=500)` | Scrolls active page viewport |
-| `navigate` | `chrome.navigate(url)` | Navigates active tab to specified URL |
-| `new_tab` | `chrome.new_tab(url)` | Opens a new browser tab |
-| `tabs` | `chrome.tabs` | Returns list of all open tabs with IDs and URLs |
-| `eval_js` | `chrome.eval_js(expr)` | Executes JavaScript expression in page context and returns result |
-| `screenshot` | `chrome.screenshot()` | Returns base64 PNG data of current tab |
-| `media` | `chrome.media.play_pause()` | Controls active HTML5 video/audio playback |
+| `snapshot` | `chrome.snapshot()` | Returns a compact semantic outline with interactive Ref-IDs |
+| `click` | `chrome.click(id)` | Click a Ref-ID or CSS selector |
+| `type` | `chrome.type(id, text, press_enter=False)` | Enter text into an input |
+| `select` | `chrome.select(id, value)` | Select an option |
+| `hover` | `chrome.hover(id)` | Trigger hover state |
+| `scroll` | `chrome.scroll(x=0, y=500)` | Scroll the active page |
+| `navigate` | `chrome.navigate(url)` | Navigate the active tab |
+| `new_tab` | `chrome.new_tab(url)` | Open a new tab |
+| `tabs` | `chrome.tabs` | List open tabs |
+| `eval_js` | `chrome.eval_js(expr)` | Execute JavaScript in page context |
+| `screenshot` | `chrome.screenshot()` | Capture the current tab |
+| `media` | `chrome.media.play_pause()` | Control HTML5 media |
+
+### Persistent state
+
+The Python runtime is designed for multi-step workflows:
+
+```python
+tab = chrome.active_tab
+
+page = tab.snapshot()
+# ... inspect page ...
+
+tab.click(12)
+# ... later ...
+
+tab.type(3, "hello")
+```
+
+Objects and variables can remain available between executions, allowing an
+agent to build on previous browser state instead of reconstructing it for every
+action.
+
+---
+
+## Security Model
+
+Chrome Bridge is designed around a **local-first trust model**.
+
+### Local bridge
+
+Communication between the agent runtime, native host, and Chrome extension uses
+local IPC and Chrome Native Messaging. Chrome Bridge does not proxy browser
+traffic through a remote browser service.
+
+### Existing browser session
+
+Automation operates against the user's existing Chrome profile and session
+rather than creating a separate automation browser.
+
+### Untrusted web content
+
+Content extracted from websites is treated as **untrusted external data**.
+The SDK includes boundaries intended to prevent webpage content from being
+mistaken for trusted agent instructions.
+
+### Destructive-action guardrails
+
+The SDK includes safeguards for high-impact operations such as:
+
+- account deletion
+- repository deletion
+- subscription cancellation
+- destructive database operations
+- data-wiping actions
+
+Intentional destructive actions can be explicitly permitted through the safety
+API.
+
+### Origin controls
+
+Navigation can be constrained to the task's allowed origins, with explicit
+mechanisms for expanding the allowed scope when a workflow requires it.
+
+### Runaway-action detection
+
+The SDK tracks browser actions to detect patterns such as:
+
+- repetitive clicks
+- click oscillation / ping-pong loops
+- excessive consecutive scrolling
+
+These controls are intended to reduce runaway agent behavior.
+
+### Important trust boundary
+
+Chrome Bridge is **not a security sandbox**.
+
+The persistent Python runtime and operations such as JavaScript evaluation are
+intentionally powerful local-agent capabilities. They should be treated as
+trusted operations.
+
+The security controls are defense-in-depth mechanisms for browser-agent
+workflows; they do not guarantee protection against every malicious webpage,
+browser extension, compromised local process, or other attack.
 
 ---
 
 ## Testing
 
-Run the test suite to verify the native host and SDK bindings:
+Run the full test suite with:
 
 ```bash
 ./test.sh
-# or
+```
+
+or:
+
+```bash
 pytest tests/
 ```
 
----
+The repository includes tests covering areas including:
 
-## Security & Architecture Principles
-
-- **Local-Only Communication:** All data transfer occurs over local standard I/O pipes. No data leaves your machine.
-- **No Cloud Proxies:** All browsing sessions execute against your local Chrome application directly.
-- **Bot-Detection Immunity:** Operates within your actual user profile and existing session cookies without triggering automation or CAPTCHA defenses.
+- Python SDK behavior
+- persistent REPL execution
+- native host communication
+- installation and runtime behavior
+- diagnostics
+- browser capabilities
+- media fast paths
+- security controls
+- destructive-action protection
+- origin restrictions
+- untrusted-data handling
+- runaway-action detection
 
 ---
 
