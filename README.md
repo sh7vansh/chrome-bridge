@@ -24,26 +24,6 @@ Chrome session instead of launching a separate, empty automation browser.
 
 ---
 
-## Why Chrome Bridge?
-
-Browser agents typically have two choices:
-
-1. Launch an isolated automation browser and lose the user's existing browser
-   state.
-2. Interact with a real browser through tooling that repeatedly rediscovers
-   page state and has limited persistence between actions.
-
-Chrome Bridge takes a different approach:
-
-> **Connect the agent to the browser the user is already using, and give it a
-> persistent programming environment for multi-step work.**
-
-The browser remains a real Chrome session while the agent gets a compact,
-stateful interface for inspecting pages, interacting with elements, managing
-tabs, and executing browser workflows.
-
----
-
 ## Architecture & Request Flow
 
 ```mermaid
