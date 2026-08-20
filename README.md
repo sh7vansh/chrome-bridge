@@ -168,7 +168,7 @@ uv tool install "mcp<2.0.0"
 Then start a network endpoint for Chrome Bridge:
 
 ```bash
-uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 uvx antigravity-chrome-bridge mcp
+uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 --stateless uvx antigravity-chrome-bridge mcp
 ```
 
 The Chrome Bridge MCP endpoint is available at:
