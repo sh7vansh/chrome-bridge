@@ -171,7 +171,14 @@ Then start a network endpoint for Chrome Bridge:
 uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 uvx antigravity-chrome-bridge mcp
 ```
 
-The remote MCP client should connect to the proxy endpoint on port `8787`.
+The Chrome Bridge MCP endpoint is available at:
+
+```text
+http://localhost:8787
+```
+
+This makes it easy to connect through a reverse proxy, SSH tunnel, VPN, or
+another tunneling/forwarding layer when a remote MCP client needs access.
 
 ---
 
