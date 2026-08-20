@@ -148,6 +148,33 @@ For an MCP-compatible client that requires manual configuration:
 
 ---
 
+## Remote Use
+
+Chrome Bridge can also be exposed to an MCP client running on another machine
+through `mcp-proxy`.
+
+> **⚠️ Security warning:** This exposes the Chrome Bridge MCP endpoint over the
+> network. Anyone who can reach the configured port may be able to control your
+> browser through the MCP interface. Only use this on a trusted network or
+> behind appropriate network access controls. Do **not** expose the endpoint
+> directly to the public internet.
+
+Install `mcp-proxy`:
+
+```bash
+uv tool install "mcp<2.0.0"
+```
+
+Then start a network endpoint for Chrome Bridge:
+
+```bash
+uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 uvx antigravity-chrome-bridge mcp
+```
+
+The remote MCP client should connect to the proxy endpoint on port `8787`.
+
+---
+
 ## CLI & Diagnostics
 
 Chrome Bridge includes CLI utilities for installation, diagnostics, health
@@ -234,7 +261,6 @@ page = tab.snapshot()
 
 tab.click(12)
 # ... later ...
-
 tab.type(3, "hello")
 ```
 
