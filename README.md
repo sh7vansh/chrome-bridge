@@ -174,7 +174,7 @@ uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 uvx antigravity-chro
 The Chrome Bridge MCP endpoint is available at:
 
 ```text
-http://localhost:8787
+http://localhost:8787/mcp
 ```
 
 This makes it easy to connect through a reverse proxy, SSH tunnel, VPN, or
