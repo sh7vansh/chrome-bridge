@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Union, runtime_checkable
 
 from .manifests import (
     HOST_NAME,
@@ -256,6 +257,133 @@ def check_file_permissions(install_dir: Path, auto_fix: bool = False) -> List[Di
                 })
 
     return issues
+
+
+@dataclass
+class DiagnosticIssue:
+    """Represents an issue discovered during environment diagnostics."""
+    type: str
+    title: str
+    detail: str
+    fixed: bool = False
+    severity: str = "warning"
+
+
+@runtime_checkable
+class DiagnosticProbe(Protocol):
+    """Protocol seam for environment diagnostic checks and self-healing remediators."""
+    name: str
+    category: str
+
+    def check(self, install_dir: Path, home_dir: Path, auto_fix: bool = False) -> List[DiagnosticIssue]:
+        """Perform diagnostic audit and optional remediation."""
+        ...
+
+
+class IpcEndpointProbe:
+    """Audits and remediates orphaned or stale socket and port files."""
+    name = "IPC Endpoint Health"
+    category = "Transport"
+
+    def check(self, install_dir: Path, home_dir: Path, auto_fix: bool = False) -> List[DiagnosticIssue]:
+        raw_issues = check_stale_ipc(auto_fix=auto_fix)
+        return [
+            DiagnosticIssue(
+                type=i.get("type", "stale_ipc"),
+                title=i.get("title", "Stale IPC endpoint"),
+                detail=i.get("detail", ""),
+                fixed=i.get("fixed", False),
+                severity="warning",
+            )
+            for i in raw_issues
+        ]
+
+
+class FilePermissionProbe:
+    """Audits and remediates POSIX launcher executable permissions."""
+    name = "Launcher Script Permissions"
+    category = "System"
+
+    def check(self, install_dir: Path, home_dir: Path, auto_fix: bool = False) -> List[DiagnosticIssue]:
+        raw_issues = check_file_permissions(install_dir, auto_fix=auto_fix)
+        return [
+            DiagnosticIssue(
+                type=i.get("type", "permission"),
+                title=i.get("title", "Missing executable permissions"),
+                detail=i.get("detail", ""),
+                fixed=i.get("fixed", False),
+                severity="warning",
+            )
+            for i in raw_issues
+        ]
+
+
+class BrowserManifestProbe:
+    """Audits browser Native Messaging host manifests."""
+    name = "Browser Native Manifests"
+    category = "Registration"
+
+    def check(self, install_dir: Path, home_dir: Path, auto_fix: bool = False) -> List[DiagnosticIssue]:
+        manifest_targets = get_browser_manifest_targets(home_dir)
+        found_count = sum(1 for _, p in manifest_targets if p.exists())
+        if found_count == 0:
+            return [
+                DiagnosticIssue(
+                    type="manifest",
+                    title="No browser Native Messaging manifests found",
+                    detail="Run 'chrome-bridge setup' to register manifests for installed browsers.",
+                    fixed=False,
+                    severity="warning",
+                )
+            ]
+        return []
+
+
+class McpConfigProbe:
+    """Audits and remediates AI agent MCP client configurations."""
+    name = "AI Agent MCP Configs"
+    category = "Client"
+
+    def check(self, install_dir: Path, home_dir: Path, auto_fix: bool = False) -> List[DiagnosticIssue]:
+        raw_issues = check_mcp_configs_health(home_dir, auto_fix=auto_fix)
+        return [
+            DiagnosticIssue(
+                type=i.get("type", "mcp_config"),
+                title=i.get("title", "MCP configuration issue"),
+                detail=i.get("detail", ""),
+                fixed=i.get("fixed", False),
+                severity="warning",
+            )
+            for i in raw_issues
+        ]
+
+
+class DoctorEngine:
+    """Pluggable diagnostic engine coordinating environment audits and self-healing."""
+
+    def __init__(self, install_dir: Optional[Path] = None, home_dir: Optional[Path] = None):
+        self.install_dir = install_dir or resolve_install_dir(None)
+        self.home_dir = home_dir or resolve_home_dir()
+        self.probes: List[DiagnosticProbe] = [
+            IpcEndpointProbe(),
+            FilePermissionProbe(),
+            BrowserManifestProbe(),
+            McpConfigProbe(),
+        ]
+
+    def register_probe(self, probe: DiagnosticProbe) -> None:
+        """Register a custom diagnostic probe."""
+        self.probes.append(probe)
+
+    def diagnose(self, auto_fix: bool = False) -> Tuple[int, int, List[DiagnosticIssue]]:
+        """Run all registered diagnostic probes and return summary (total_issues, total_fixed, issues)."""
+        all_issues: List[DiagnosticIssue] = []
+        total_fixed = 0
+        for probe in self.probes:
+            issues = probe.check(self.install_dir, self.home_dir, auto_fix=auto_fix)
+            all_issues.extend(issues)
+            total_fixed += sum(1 for i in issues if i.fixed)
+        return len(all_issues), total_fixed, all_issues
 
 
 def run_doctor(

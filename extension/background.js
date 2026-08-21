@@ -136,58 +136,107 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-async function resolveTabId(specifiedId) {
-  if (specifiedId) return specifiedId;
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (activeTab) return activeTab.id;
-  const [anyTab] = await chrome.tabs.query({ active: true });
-  if (anyTab) return anyTab.id;
-  throw new Error('No active browser tab found');
-}
+export const TabExecutionCoordinator = {
+  async resolveTabId(specifiedId) {
+    if (specifiedId) return specifiedId;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab) return activeTab.id;
+    const [anyTab] = await chrome.tabs.query({ active: true });
+    if (anyTab) return anyTab.id;
+    throw new Error('No active browser tab found');
+  },
 
-async function executeInPage(tabId, operation, args = {}) {
-  const targetId = await resolveTabId(tabId);
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: targetId },
-      func: inPageDOMOperation,
-      args: [{ operation, args }]
-    });
+  async executeInPage(tabId, operation, args = {}) {
+    const targetId = await this.resolveTabId(tabId);
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: targetId },
+        func: inPageDOMOperation,
+        args: [{ operation, args }]
+      });
 
-    const res = results[0]?.result;
-    if (res && res.__error) {
-      const customErr = new Error(res.__error.message || `Action error: ${res.__error.code}`);
-      customErr.structuredError = res.__error;
-      throw customErr;
-    }
-    return res;
-  } catch (err) {
-    if (err.structuredError) throw err;
-    const errMsg = err.message || '';
-    // If context was detached during an async wait due to a hard page navigation, retry after tab loads
-    if (errMsg.includes('frame was detached') || errMsg.includes('Cannot access contents of url') || errMsg.includes('tab was closed')) {
-      if (operation === 'wait_for' || operation === 'wait_for_url') {
-        await new Promise(r => setTimeout(r, 400));
-        const tab = await chrome.tabs.get(targetId).catch(() => null);
-        if (tab && tab.status === 'complete') {
-          const retryResults = await chrome.scripting.executeScript({
-            target: { tabId: targetId },
-            func: inPageDOMOperation,
-            args: [{ operation, args }]
-          });
-          const retryRes = retryResults[0]?.result;
-          if (retryRes && retryRes.__error) {
-            const customErr = new Error(retryRes.__error.message || `Action error: ${retryRes.__error.code}`);
-            customErr.structuredError = retryRes.__error;
-            throw customErr;
+      const res = results[0]?.result;
+      if (res && res.__error) {
+        const customErr = new Error(res.__error.message || `Action error: ${res.__error.code}`);
+        customErr.structuredError = res.__error;
+        throw customErr;
+      }
+      return res;
+    } catch (err) {
+      if (err.structuredError) throw err;
+      const errMsg = err.message || '';
+      // If context was detached during an async wait due to a hard page navigation, retry after tab loads
+      if (errMsg.includes('frame was detached') || errMsg.includes('Cannot access contents of url') || errMsg.includes('tab was closed')) {
+        if (operation === 'wait_for' || operation === 'wait_for_url') {
+          await new Promise(r => setTimeout(r, 400));
+          const tab = await chrome.tabs.get(targetId).catch(() => null);
+          if (tab && tab.status === 'complete') {
+            const retryResults = await chrome.scripting.executeScript({
+              target: { tabId: targetId },
+              func: inPageDOMOperation,
+              args: [{ operation, args }]
+            });
+            const retryRes = retryResults[0]?.result;
+            if (retryRes && retryRes.__error) {
+              const customErr = new Error(retryRes.__error.message || `Action error: ${retryRes.__error.code}`);
+              customErr.structuredError = retryRes.__error;
+              throw customErr;
+            }
+            return retryRes;
           }
-          return retryRes;
         }
       }
+      throw err;
     }
-    throw err;
+  },
+
+  async evaluateScript(tabId, code) {
+    if (!code) throw new Error('Missing "code" parameter');
+    const targetId = await this.resolveTabId(tabId);
+    const target = { tabId: targetId };
+
+    try {
+      await chrome.debugger.attach(target, '1.3');
+      const evalRes = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: code,
+        returnByValue: true,
+        awaitPromise: true
+      });
+      await chrome.debugger.detach(target);
+
+      if (evalRes.exceptionDetails) {
+        throw new Error(evalRes.exceptionDetails.exception?.description || evalRes.exceptionDetails.text);
+      }
+      return evalRes.result?.value;
+    } catch (dbgErr) {
+      try { await chrome.debugger.detach(target); } catch {}
+
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: targetId },
+        world: 'MAIN',
+        func: async (expression) => {
+          if (expression === 'document.title') return document.title;
+          if (expression === 'location.href' || expression === 'window.location.href') return window.location.href;
+          try {
+            return await (0, eval)(expression);
+          } catch (e) {
+            return { __error: e.message };
+          }
+        },
+        args: [code]
+      });
+
+      const execResult = results[0]?.result;
+      if (execResult && typeof execResult === 'object' && execResult.__error) {
+        throw new Error(execResult.__error);
+      }
+      return execResult;
+    }
   }
-}
+};
+
+const resolveTabId = (id) => TabExecutionCoordinator.resolveTabId(id);
+const executeInPage = (id, op, args) => TabExecutionCoordinator.executeInPage(id, op, args);
 
 async function handleAction(action, params) {
   switch (action) {
@@ -349,48 +398,7 @@ async function handleAction(action, params) {
     }
 
     case 'execute_script': {
-      const { code, tabId } = params;
-      if (!code) throw new Error('Missing "code" parameter');
-      const targetId = await resolveTabId(tabId);
-
-      const target = { tabId: targetId };
-      try {
-        await chrome.debugger.attach(target, '1.3');
-        const evalRes = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
-          expression: code,
-          returnByValue: true,
-          awaitPromise: true
-        });
-        await chrome.debugger.detach(target);
-
-        if (evalRes.exceptionDetails) {
-          throw new Error(evalRes.exceptionDetails.exception?.description || evalRes.exceptionDetails.text);
-        }
-        return evalRes.result?.value;
-      } catch (dbgErr) {
-        try { await chrome.debugger.detach(target); } catch {}
-
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: targetId },
-          world: 'MAIN',
-          func: async (expression) => {
-            if (expression === 'document.title') return document.title;
-            if (expression === 'location.href' || expression === 'window.location.href') return window.location.href;
-            try {
-              return await (0, eval)(expression);
-            } catch (e) {
-              return { __error: e.message };
-            }
-          },
-          args: [code]
-        });
-
-        const execResult = results[0]?.result;
-        if (execResult && typeof execResult === 'object' && execResult.__error) {
-          throw new Error(execResult.__error);
-        }
-        return execResult;
-      }
+      return await TabExecutionCoordinator.evaluateScript(params.tabId, params.code);
     }
 
     default:

@@ -78,6 +78,22 @@ _Avoid_: Script builder, JS generator, query template engine
 The structured domain payload encapsulating failing script lines, partial standard output, fuzzy candidate locators, and token-budgeted Semantic DOM Auto-Snapshots produced upon execution failure.
 _Avoid_: Error payload, failure bundle, debug response
 
+**IPC Framing Engine (`IpcFramingEngine`)**:
+The centralized binary and stream serialization module handling 4-byte length-prefix packing, buffer fragmentation reassembly, and line-delimited JSON IPC framing across sockets and standard pipes.
+_Avoid_: Binary helper, buffer splitter, packet parser
+
+**Doctor Engine & Diagnostic Probe (`DoctorEngine`, `DiagnosticProbe`)**:
+The extensible system auditing and self-healing subsystem providing modular diagnostic probes and automated remediation across runtime environments, native messaging manifests, and AI agent MCP configurations.
+_Avoid_: Health checker, repair script, diagnostic checker
+
+**Tab Execution Coordinator (`TabExecutionCoordinator`)**:
+The Chrome extension execution seam coordinating script injection, execution world isolation (MAIN for user expressions, ISOLATED for secure DOM traversal), debugger fallback, and promise resolution across tabs.
+_Avoid_: Script runner, execution dispatcher, injection wrapper
+
+**Ambient State Cache (`AmbientStateCache`)**:
+The in-memory memoization and cache management module within the Python REPL runtime that prevents redundant IPC roundtrips for ambient orientation headers during read-only multi-step execution.
+_Avoid_: Header cache, state memory, tab memoizer
+
 
 
 ## Abstraction Seam Guarantees

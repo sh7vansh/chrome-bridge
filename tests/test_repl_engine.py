@@ -174,3 +174,65 @@ def test_extract_diagnostic_report_helper():
         assert diag.candidate_matches[0]["ref"] == "5"
 
 
+def test_repl_session_engine_execute_raw_and_reset():
+    from chrome_bridge.repl import ReplSessionEngine, ExecutionOutcome
+
+    engine = ReplSessionEngine(include_ambient=False)
+    outcome = engine.execute_raw("val = 100\nval * 2")
+    assert isinstance(outcome, ExecutionOutcome)
+    assert outcome.has_result is True
+    assert outcome.result == 200
+    assert outcome.error is None
+
+    # Test reset clears custom variables
+    engine.reset()
+    outcome_after_reset = engine.execute_raw("val")
+    assert outcome_after_reset.error is not None
+    assert "NameError" in outcome_after_reset.error
+
+
+def test_ambient_state_cache_memoization_and_invalidation():
+    from chrome_bridge.repl import AmbientStateCache
+
+    class MockChrome:
+        def __init__(self):
+            self.count = 0
+        def get_ambient_header(self):
+            self.count += 1
+            return f"[header {self.count}]"
+
+    mock = MockChrome()
+    cache = AmbientStateCache(ttl=2.0)
+
+    # First fetch gets fresh
+    h1 = cache.get(mock)
+    assert h1 == "[header 1]"
+    assert mock.count == 1
+
+    # Second fetch within TTL returns cached without calling get_ambient_header
+    h2 = cache.get(mock)
+    assert h2 == "[header 1]"
+    assert mock.count == 1
+
+    # Force or invalidate gets fresh
+    cache.invalidate()
+    h3 = cache.get(mock)
+    assert h3 == "[header 2]"
+    assert mock.count == 2
+
+
+def test_compress_dom_snapshot_budgeting():
+    from chrome_bridge.repl import compress_dom_snapshot
+
+    raw_snapshot = 'PAGE: "Long Page"\nURL: "https://example.com"\n' + '\n'.join(
+        [f"- div [# {i}] Container {i}\n  - button [#{i+100}] Click {i}" for i in range(100)]
+    )
+
+    compressed = compress_dom_snapshot(raw_snapshot, max_chars=1000)
+    assert len(compressed) <= 1050
+    assert 'PAGE: "Long Page"' in compressed
+    assert "- button [#" in compressed
+
+
+
+

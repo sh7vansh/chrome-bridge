@@ -31,11 +31,23 @@ from .security import (
 )
 from .transport import (
     ChromeSocketClient,
+    IpcFramingEngine,
     TransportClient,
 )
 from .compiler import (
     DomBatchSynthesizer,
     DomCompiler,
+)
+from .repl import (
+    AmbientStateCache,
+    DiagnosticReport,
+    ExecutionOutcome,
+    ExecutionTimeoutContext,
+    OutputBudgetFormatter,
+    PythonReplSession,
+    ReplSessionEngine,
+    compress_dom_snapshot,
+    extract_diagnostic_report,
 )
 from .ui import (
     SpinnerContext,
@@ -65,6 +77,9 @@ from .mcp_config import (
     update_mcp_client_config,
 )
 from .doctor import (
+    DiagnosticIssue,
+    DiagnosticProbe,
+    DoctorEngine,
     check_file_permissions,
     check_stale_ipc,
     run_cleanup,
@@ -101,8 +116,21 @@ __all__ = [
     "global_safety",
     "TransportClient",
     "ChromeSocketClient",
+    "IpcFramingEngine",
     "DomCompiler",
     "DomBatchSynthesizer",
+    "ReplSessionEngine",
+    "PythonReplSession",
+    "ExecutionOutcome",
+    "DiagnosticReport",
+    "OutputBudgetFormatter",
+    "ExecutionTimeoutContext",
+    "AmbientStateCache",
+    "compress_dom_snapshot",
+    "extract_diagnostic_report",
+    "DoctorEngine",
+    "DiagnosticProbe",
+    "DiagnosticIssue",
     "TerminalUI",
     "SpinnerContext",
     "ui",

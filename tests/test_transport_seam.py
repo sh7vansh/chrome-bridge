@@ -47,3 +47,45 @@ def test_tab_with_in_process_mock_transport():
     res = chrome.click(1)
     assert res == {"status": "ok", "action": "click"}
     assert ("click", {"target": {"type": "ref", "refId": 1}, "button": "left", "count": 1, "tabId": None}) in mock.calls
+
+
+def test_ipc_framing_engine_length_prefixed_roundtrip():
+    import io
+    import struct
+    from chrome_bridge.transport import IpcFramingEngine
+
+    payload = {"action": "navigate", "url": "https://example.com", "options": {"timeout": 30}}
+    packed = IpcFramingEngine.pack_length_prefixed(payload)
+    assert len(packed) >= 4
+    length = struct.unpack("<I", packed[:4])[0]
+    assert length == len(packed) - 4
+
+    stream = io.BytesIO(packed)
+    unpacked = IpcFramingEngine.unpack_length_prefixed_stream(stream)
+    assert unpacked == payload
+
+
+def test_ipc_framing_engine_line_delimited_roundtrip():
+    from chrome_bridge.transport import IpcFramingEngine
+
+    msg1 = {"id": 1, "action": "ping"}
+    msg2 = {"id": 2, "result": "pong"}
+
+    packed1 = IpcFramingEngine.pack_line_delimited(msg1)
+    packed2 = IpcFramingEngine.pack_line_delimited(msg2)
+    combined = packed1 + packed2
+
+    # Parse full combined buffer
+    msgs, rem = IpcFramingEngine.unpack_line_delimited_buffer(combined)
+    assert len(msgs) == 2
+    assert msgs[0] == msg1
+    assert msgs[1] == msg2
+    assert rem == b""
+
+    # Parse partial buffer
+    partial = packed1 + b'{"id": 3, "action": '
+    msgs_partial, rem_partial = IpcFramingEngine.unpack_line_delimited_buffer(partial)
+    assert len(msgs_partial) == 1
+    assert msgs_partial[0] == msg1
+    assert rem_partial == b'{"id": 3, "action": '
+

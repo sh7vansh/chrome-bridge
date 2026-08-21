@@ -28,7 +28,7 @@ except ImportError:
     except ImportError:
         from mcp.server.mcpserver import MCPServer as FastMCP
 
-from repl_engine import PythonReplSession
+from chrome_bridge.repl import PythonReplSession, ReplSessionEngine
 
 API_DOCS = r"""# Chrome Bridge - Python SDK API Reference
 

@@ -125,3 +125,15 @@ def test_dom_compiler_compile_fill_form_js():
     assert "dispatchEvent(new Event('input'" in js_form
     assert "dispatchEvent(new Event('change'" in js_form
 
+
+def test_dom_compiler_unified_discovery_helpers():
+    """Verify compiler JavaScript templates contain unified accessible name and computed role helpers."""
+    from chrome_bridge.compiler import _DISCOVERY_HELPER_JS
+    assert "__cb_is_visible" in _DISCOVERY_HELPER_JS
+    assert "__cb_get_accessible_name" in _DISCOVERY_HELPER_JS
+    assert "__cb_get_computed_role" in _DISCOVERY_HELPER_JS
+    assert "__cb_tag" in _DISCOVERY_HELPER_JS
+    assert "aria-labelledby" in _DISCOVERY_HELPER_JS
+    assert "aria-label" in _DISCOVERY_HELPER_JS
+
+

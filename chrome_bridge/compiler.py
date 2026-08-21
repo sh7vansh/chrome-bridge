@@ -15,7 +15,7 @@ from .exceptions import (
 )
 
 _DISCOVERY_HELPER_JS = """
-function __cb_is_visible(el) {
+function __cb_is_visible(el, style) {
     if (!el || el.nodeType !== 1) return false;
     if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return false;
     if (typeof el.checkVisibility === 'function') {
@@ -24,14 +24,81 @@ function __cb_is_visible(el) {
             return false;
         }
     }
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) < 0.05) return false;
+    if (!style) style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || parseFloat(style.opacity) < 0.05) return false;
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0) {
         if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
         return false;
     }
     return true;
+}
+
+function __cb_get_accessible_name(el) {
+    if (!el) return '';
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby) {
+        const parts = labelledby.split(/\\s+/).map(id => document.getElementById(id)?.innerText?.trim()).filter(Boolean);
+        if (parts.length > 0) return parts.join(' ');
+    }
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+
+    if (el.id && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
+        try {
+            const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+            if (labelEl && labelEl.innerText.trim()) return labelEl.innerText.trim();
+        } catch(e) {}
+    }
+    const parentLabel = el.closest('label');
+    if (parentLabel && parentLabel.innerText.trim()) return parentLabel.innerText.trim();
+
+    if (el.getAttribute('placeholder')) return el.getAttribute('placeholder').trim();
+    if (el.getAttribute('title')) return el.getAttribute('title').trim();
+    if (el.getAttribute('alt')) return el.getAttribute('alt').trim();
+
+    if (['BUTTON', 'A', 'SUMMARY', 'OPTION'].includes(el.tagName)) {
+        const fullText = (el.innerText || el.textContent || '').trim();
+        if (fullText) return fullText.slice(0, 120);
+    }
+    return (el.innerText || el.textContent || el.value || '').trim().slice(0, 120);
+}
+
+function __cb_get_computed_role(el) {
+    if (!el) return 'generic';
+    const explicitRole = el.getAttribute('role');
+    if (explicitRole) return explicitRole.toLowerCase().trim();
+
+    const tag = el.tagName.toLowerCase();
+    switch (tag) {
+        case 'a': return el.hasAttribute('href') ? 'link' : 'generic';
+        case 'button': return 'button';
+        case 'input': {
+            const type = (el.getAttribute('type') || 'text').toLowerCase();
+            if (['button', 'submit', 'reset', 'image'].includes(type)) return 'button';
+            if (type === 'checkbox') return 'checkbox';
+            if (type === 'radio') return 'radio';
+            if (type === 'search') return 'searchbox';
+            return 'textbox';
+        }
+        case 'select': return 'combobox';
+        case 'textarea': return 'textbox';
+        case 'summary': return 'button';
+        case 'details': return 'group';
+        case 'h1': return 'heading[level=1]';
+        case 'h2': return 'heading[level=2]';
+        case 'h3': return 'heading[level=3]';
+        case 'h4': return 'heading[level=4]';
+        case 'h5': return 'heading[level=5]';
+        case 'h6': return 'heading[level=6]';
+        case 'nav': return 'navigation';
+        case 'main': return 'main';
+        case 'header': return 'banner';
+        case 'footer': return 'contentinfo';
+        case 'form': return 'form';
+        case 'table': return 'table';
+        default: return 'generic';
+    }
 }
 
 function __cb_tag(el) {
@@ -42,8 +109,8 @@ function __cb_tag(el) {
         bridgeId = 'cb_' + (++window.__cb_handle_counter) + '_' + Date.now().toString(36);
         el.setAttribute('data-cbridge-id', bridgeId);
     }
-    const text = (el.innerText || el.textContent || el.value || '').trim();
-    const role = el.getAttribute('role') || el.tagName.toLowerCase();
+    const text = __cb_get_accessible_name(el);
+    const role = __cb_get_computed_role(el);
     return {
         selector: '[data-cbridge-id="' + bridgeId + '"]',
         tagName: el.tagName.toLowerCase(),
