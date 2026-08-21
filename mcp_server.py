@@ -186,13 +186,14 @@ mcp = FastMCP(
         "   results = chrome.extract_items('.g', {'title': 'h3', 'url': 'a@href'})\n\n"
         "2. Form Fill & Submit:\n"
         "   chrome.fill_form({'Email': 'user@example.com', 'Remember': True}, submit='Sign In')\n\n"
-        "3. In-Script Fluent Actions:\n"
-        "   chrome.find_input('Search').type('Python SDK', press_enter=True)\n"
-        "   chrome.find_button('Filter').click()\n\n"
-        "4. Media Control:\n"
+        "3. Table / List Extraction:\n"
+        "   products = chrome.extract_items('tr.product-row', {'name': '.prod-title', 'price': '.price', 'link': 'a@href'})\n\n"
+        "4. Zero-DOM Media Control:\n"
         "   chrome.media.toggle()\n"
         "   chrome.media.seek(15.0)\n\n"
-        "5. Self-Healing: If an element is not found, inspect the automatic `[candidate_matches]` or `[diagnostic_auto_snapshot]` in the error payload."
+        "5. In-Script Fluent Actions & Self-Healing:\n"
+        "   chrome.find_input('Search').type('Python SDK', press_enter=True)\n"
+        "   If an element is not found, inspect `[candidate_matches]` or `[diagnostic_auto_snapshot]`."
     ),
 )
 

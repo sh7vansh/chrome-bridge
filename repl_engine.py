@@ -97,7 +97,14 @@ class OutputBudgetFormatter:
                 error_text = error
             sections.append(f"[error]\n{self._truncate_string(error_text, 2000)}")
 
-        # 2. Candidate Matches (Fuzzy matches on failure)
+        # 2. Stdout or Partial Stdout
+        if stdout and stdout.strip():
+            stdout_budget = max(2000, int(self.max_chars * 0.4))
+            truncated_stdout = self._truncate_string(stdout.strip(), stdout_budget)
+            tag = "[partial_stdout]" if error else "[stdout]"
+            sections.append(f"{tag}\n{truncated_stdout}")
+
+        # 3. Candidate Matches (Fuzzy matches on failure)
         if candidate_matches and len(candidate_matches) > 0:
             match_lines = []
             for m in candidate_matches:
@@ -112,18 +119,11 @@ class OutputBudgetFormatter:
                     match_lines.append(f"- {m}")
             sections.append(f"[candidate_matches]\n" + "\n".join(match_lines))
 
-        # 3. Diagnostic Auto-Snapshot (if present from error recovery)
+        # 4. Diagnostic Auto-Snapshot (if present from error recovery)
         if auto_snapshot and auto_snapshot.strip():
             snapshot_budget = max(2000, int(self.max_chars * 0.4))
             truncated_snapshot = self._truncate_string(auto_snapshot.strip(), snapshot_budget)
             sections.append(f"[diagnostic_auto_snapshot]\n{truncated_snapshot}")
-
-        # 4. Stdout or Partial Stdout
-        if stdout and stdout.strip():
-            stdout_budget = max(2000, int(self.max_chars * 0.4))
-            truncated_stdout = self._truncate_string(stdout.strip(), stdout_budget)
-            tag = "[partial_stdout]" if error else "[stdout]"
-            sections.append(f"{tag}\n{truncated_stdout}")
 
         # 5. Stderr
         if stderr and stderr.strip():
@@ -243,11 +243,12 @@ class PythonReplSession:
         self,
         globals_dict: Optional[Dict[str, Any]] = None,
         formatter: Optional[OutputBudgetFormatter] = None,
-        include_ambient: bool = False,
+        include_ambient: bool = True,
     ):
         from chrome_sdk import chrome as default_chrome
         self.formatter = formatter or OutputBudgetFormatter()
         self.include_ambient = include_ambient
+
         self._globals: Dict[str, Any] = {
             "__name__": "__main__",
             "__doc__": None,

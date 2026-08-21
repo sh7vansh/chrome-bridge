@@ -68,6 +68,24 @@ def test_fill_form_with_checkbox_and_submit():
     submit_btn.click.assert_called_once()
 
 
+def test_fill_form_with_radio_buttons():
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+
+    radio_handle = ElementHandle(tab=tab, target="[#15]", tag_name="input", role="radio")
+    radio_handle.eval_js = MagicMock(return_value={"isRadio": True, "checked": False})
+    radio_handle.click = MagicMock()
+    radio_handle.type = MagicMock()
+
+    tab.find_input = MagicMock(return_value=radio_handle)
+
+    res = tab.fill_form({"Delivery Option": "Express Delivery"})
+    assert res["success"] is True
+    assert res["filled"] == 1
+    radio_handle.click.assert_called_once()
+    radio_handle.type.assert_not_called()
+
+
 def test_extract_items():
     client = MagicMock()
     client.call.return_value = {
@@ -94,6 +112,64 @@ def test_extract_items():
     assert "article.post" in call_args[0][1]["code"]
 
 
+def test_extract_items_complex_attributes():
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+
+    client.call.return_value = {
+        "result": [
+            {
+                "title": "Pro Headphones",
+                "image": "https://example.com/img1.jpg",
+                "sku": "SKU-9901",
+                "aria": "Add Pro Headphones to cart",
+                "id": "prod-1",
+            },
+            {
+                "title": "Wireless Mouse",
+                "image": "https://example.com/img2.jpg",
+                "sku": "SKU-9902",
+                "aria": "Add Wireless Mouse to cart",
+                "id": "prod-2",
+            },
+        ]
+    }
+
+    fields = {
+        "title": "h3.prod-title",
+        "image": "img.thumbnail@src",
+        "sku": "@data-sku",
+        "aria": "button.buy@aria-label",
+        "id": "self@id",
+    }
+    items = tab.extract_items("div.product-card", fields=fields)
+
+    assert len(items) == 2
+    assert items[0]["sku"] == "SKU-9901"
+    assert items[0]["image"] == "https://example.com/img1.jpg"
+    assert items[0]["aria"] == "Add Pro Headphones to cart"
+    assert items[0]["id"] == "prod-1"
+
+    # Verify generated JS contains all selector mappings
+    call_args = client.call.call_args_list[0]
+    code = call_args[0][1]["code"]
+    assert "div.product-card" in code
+    assert "img.thumbnail@src" in code
+    assert "@data-sku" in code
+
+
+def test_extract_items_text_keyword_does_not_query_selector():
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+    client.call.return_value = {"result": [{"content": "Hello World"}]}
+
+    tab.extract_items("div.message", fields={"content": "text"})
+    call_args = client.call.call_args_list[0]
+    code = call_args[0][1]["code"]
+    assert "sel !== 'text'" in code or "sel.toLowerCase() !== 'text'" in code or "toLowerCase() === 'text'" in code
+
+
+
 def test_search_shortcut():
     client = MagicMock()
     client.call.side_effect = [
@@ -111,13 +187,16 @@ def test_search_shortcut():
 def test_chrome_proxies_batch_helpers():
     client = MagicMock()
     client.call.side_effect = [
-        # list_tabs response for active_tab
-        [{"id": 1, "title": "Home", "url": "https://example.com", "active": True}],
-        # eval_js response
-        {"result": None},
-        # navigate response
-        {"url": "https://duckduckgo.com/?q=test", "tabId": 1},
+        {"result": None},  # eval_js execute_script for beforeunload
+        {"url": "https://duckduckgo.com/?q=test", "tabId": None},  # navigate
     ]
     chrome = Chrome(client=client)
     res = chrome.search("test", engine="duckduckgo")
     assert "duckduckgo.com" in res.get("url", "")
+    assert client.call.call_count == 2
+    # Verify no list_tabs was called
+    actions_called = [c[0][0] for c in client.call.call_args_list]
+    assert "list_tabs" not in actions_called
+    assert client.call.call_args_list[1][0] == ("navigate", {"url": "https://duckduckgo.com/?q=test", "tabId": None})
+
+

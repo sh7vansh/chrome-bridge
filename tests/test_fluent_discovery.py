@@ -50,6 +50,27 @@ def test_element_handle_chaining():
     )
 
 
+def test_element_handle_scroll_into_view_and_eval_js():
+    client = MagicMock()
+    client.call.side_effect = [
+        {"result": None},  # scroll_into_view eval_js
+        {"status": "ok"},  # hover
+        {"status": "ok"},  # click
+        {"result": "Custom Value"},  # eval_js
+    ]
+    tab = Tab(tab_id=1, client=client)
+    handle = ElementHandle(tab=tab, target="[#12]", tag_name="button", role="button")
+
+    # Multi-method chaining
+    res = handle.scroll_into_view().hover().click()
+    assert res is handle
+    assert client.call.call_count == 3
+
+    # Direct element eval_js
+    custom_val = handle.eval_js("this.getAttribute('data-custom')")
+    assert custom_val == {"result": "Custom Value"} or custom_val == "Custom Value"
+
+
 def test_element_handle_properties():
     client = MagicMock()
     client.call.side_effect = [
@@ -60,6 +81,8 @@ def test_element_handle_properties():
     handle = ElementHandle(tab=tab, target="[#5]", tag_name="a", role="link")
 
     assert handle.text == "Extracted Button Text"
+    assert handle.tag_name == "a"
+    assert handle.role == "link"
     assert handle.get_attribute("href") == "https://example.com/item"
     assert repr(handle).startswith("<ElementHandle")
 
@@ -142,6 +165,33 @@ def test_tab_query_all():
     assert items[1].target == '[data-cbridge-id="cb_11"]'
 
 
+def test_tab_query_all_various_response_structures():
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+
+    # 1. Dict payload wrapping results with mixed selector/ref/target fields
+    client.call.return_value = {
+        "result": [
+            {"selector": '[data-cbridge-id="cb_1"]', "tagName": "div", "role": "button", "text": "Card 1"},
+            {"ref": "#2", "tagName": "div", "role": "button", "text": "Card 2"},
+            {"target": "[#3]", "tagName": "div", "role": "button", "text": "Card 3"},
+        ]
+    }
+    items = tab.query_all("div.card")
+    assert len(items) == 3
+    assert items[0].target == '[data-cbridge-id="cb_1"]'
+    assert items[1].target == "#2"
+    assert items[2].target == "[#3]"
+
+    # 2. None / invalid result returns empty list cleanly
+    client.call.return_value = None
+    assert tab.query_all("nonexistent") == []
+
+    client.call.return_value = {"result": "not a list"}
+    assert tab.query_all("nonexistent") == []
+
+
+
 def test_find_timeout_raises_element_not_found_error():
     client = MagicMock()
     # Mock eval_js returning None (not found)
@@ -154,21 +204,56 @@ def test_find_timeout_raises_element_not_found_error():
     assert "Nonexistent Element" in str(exc_info.value)
 
 
-def test_chrome_proxies_fluent_finders():
+def test_chrome_fluent_actions_single_roundtrip_without_list_tabs():
     client = MagicMock()
-    client.call.side_effect = [
-        # list_tabs response for active_tab
-        [{"id": 1, "title": "Home", "url": "https://example.com", "active": True}],
-        # eval_js response
-        {
-            "selector": '[data-cbridge-id="cb_99"]',
-            "tagName": "button",
-            "role": "button",
-            "text": "Submit Form",
-        },
-    ]
+    client.call.return_value = {
+        "selector": '[data-cbridge-id="cb_99"]',
+        "tagName": "button",
+        "role": "button",
+        "text": "Submit Form",
+    }
     chrome = Chrome(client=client)
     btn = chrome.find_button("Submit Form")
 
     assert isinstance(btn, ElementHandle)
     assert btn.target == '[data-cbridge-id="cb_99"]'
+    # Must NOT have called list_tabs - single roundtrip directly on active context
+    assert client.call.call_count == 1
+    action_called, params = client.call.call_args[0][0], client.call.call_args[0][1]
+    assert action_called == "execute_script"
+    assert params.get("tabId") is None
+
+
+def test_tab_find_allocates_remaining_deadline_across_fallbacks():
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+
+    tab.find_button = MagicMock(side_effect=ElementNotFoundError("target", tab_id=1))
+    tab.find_input = MagicMock(side_effect=ElementNotFoundError("target", tab_id=1))
+    tab.find_text = MagicMock(return_value=ElementHandle(tab=tab, target="[#9]"))
+
+    h = tab.find("Sign Up Here", timeout=1.5)
+    assert h.target == "[#9]"
+
+    # Must allocate remaining budget (> 1.0s) rather than a rigid 1/3 (0.5s)
+    args, kwargs = tab.find_text.call_args
+    passed_timeout = kwargs.get("timeout")
+    assert passed_timeout > 1.0
+
+
+def test_poll_find_sleep_interval():
+    from unittest.mock import patch
+
+    client = MagicMock()
+    tab = Tab(tab_id=1, client=client)
+
+    sleep_calls = []
+    with patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
+        with pytest.raises(ElementNotFoundError):
+            tab._poll_find(lambda: None, query="missing", timeout=0.25)
+
+    assert len(sleep_calls) > 0
+    # Spec 035 asks for 100ms (0.1s) polling intervals
+    assert all(abs(s - 0.1) < 1e-3 for s in sleep_calls)
+
+

@@ -48,9 +48,10 @@ print("Warning diagnostic", file=sys.stderr)
 
 
 def test_executed_successfully_with_no_output():
-    session = PythonReplSession()
+    session = PythonReplSession(include_ambient=False)
     out = session.execute("z = 100")
     assert out == "(executed successfully with no output)"
+
 
 
 def test_last_result_variable_underscore():

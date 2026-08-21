@@ -452,6 +452,7 @@ class ElementNotFoundError(ChromeBridgeError):
         stale: bool = False,
         suggestions: Optional[List[Dict[str, Any]]] = None,
         url: str = "",
+        auto_snapshot: Optional[str] = None,
     ):
         tab_str = f" in tab {tab_id}" if tab_id is not None else ""
         url_str = f" (URL: {url})" if url else ""
@@ -468,6 +469,7 @@ class ElementNotFoundError(ChromeBridgeError):
             msg += f" Did you mean: {', '.join(sug_list)}?"
 
         super().__init__(msg, tab_id)
+        self.auto_snapshot = auto_snapshot
         self.target = target
         self.stale = stale
         self.suggestions = suggestions or []
@@ -979,6 +981,34 @@ class ElementHandle:
     def locator(self) -> TargetLocator:
         """Target locator for this element."""
         return self.target
+
+    @property
+    def tag_name(self) -> str:
+        """HTML tag name of this element (e.g. 'button', 'input', 'select')."""
+        return self._tag_name
+
+    @property
+    def role(self) -> str:
+        """Accessibility or ARIA role of this element (e.g. 'button', 'radio', 'combobox')."""
+        return self._role
+
+    @property
+    def is_radio(self) -> bool:
+        """True if the element represents a radio button."""
+        if self._role == "radio":
+            return True
+        if self._tag_name and self._tag_name.lower() not in ("input", ""):
+            return False
+        if hasattr(self, "eval_js"):
+            try:
+                res = self.eval_js("((this.tagName === 'INPUT' && this.type === 'radio') || this.getAttribute('role') === 'radio')")
+                if isinstance(res, bool):
+                    return res
+                if isinstance(res, dict) and "result" in res and isinstance(res["result"], bool):
+                    return res["result"]
+            except Exception:
+                pass
+        return False
 
     @property
     def text(self) -> str:
@@ -1531,7 +1561,7 @@ class Tab:
             pass
         return []
 
-    def _poll_find(self, finder_func, query: str, timeout: float = 1.5) -> ElementHandle:
+    def _poll_find(self, finder_func, query: str, timeout: float = 1.5, interval: float = 0.1) -> ElementHandle:
         deadline = time.time() + max(0.0, timeout)
         while True:
             try:
@@ -1550,10 +1580,22 @@ class Tab:
                 pass
             if time.time() >= deadline:
                 break
-            time.sleep(0.05)
+            time.sleep(interval)
 
         suggestions = self._collect_fuzzy_suggestions(query)
-        raise ElementNotFoundError(target=query, tab_id=self.id, url=self.url, suggestions=suggestions)
+        snap = None
+        try:
+            snap = self.snapshot(format="compact", max_tokens=1500)
+        except Exception:
+            pass
+        raise ElementNotFoundError(
+            target=query,
+            tab_id=self.id,
+            url=getattr(self, "url", ""),
+            suggestions=suggestions,
+            auto_snapshot=snap,
+        )
+
 
     def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a visible DOM element by inner text or accessible content with dynamic micro-wait."""
@@ -1723,31 +1765,23 @@ class Tab:
         }})()
         """
         res = self.eval_js(js)
-        if isinstance(res, list):
-            return [
-                ElementHandle(
-                    tab=self,
-                    target=item.get("selector") or item.get("target"),
-                    tag_name=item.get("tagName", ""),
-                    role=item.get("role", ""),
-                    text=item.get("text", ""),
-                )
-                for item in res
-                if isinstance(item, dict)
-            ]
-        elif isinstance(res, dict) and isinstance(res.get("result"), list):
-            return [
-                ElementHandle(
-                    tab=self,
-                    target=item.get("selector") or item.get("target"),
-                    tag_name=item.get("tagName", ""),
-                    role=item.get("role", ""),
-                    text=item.get("text", ""),
-                )
-                for item in res["result"]
-                if isinstance(item, dict)
-            ]
-        return []
+        raw_items = res if isinstance(res, list) else (res.get("result") if isinstance(res, dict) and isinstance(res.get("result"), list) else [])
+        results: List[ElementHandle] = []
+        for item in raw_items:
+            if isinstance(item, dict):
+                target = item.get("selector") or item.get("target") or item.get("ref")
+                if target is not None:
+                    results.append(
+                        ElementHandle(
+                            tab=self,
+                            target=target,
+                            tag_name=item.get("tagName", ""),
+                            role=item.get("role", ""),
+                            text=item.get("text", ""),
+                        )
+                    )
+        return results
+
 
     def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
         """Polymorphically find an element by Ref-ID, CSS selector, button name, input label, or text."""
@@ -1776,15 +1810,20 @@ class Tab:
             except ElementNotFoundError:
                 pass
 
+        deadline = time.time() + (timeout if timeout is not None else 1.5)
+        def _remaining_timeout() -> float:
+            return max(0.05, deadline - time.time())
+
         try:
-            return self.find_button(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+            return self.find_button(target_str, timeout=_remaining_timeout())
         except ElementNotFoundError:
             pass
         try:
-            return self.find_input(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+            return self.find_input(target_str, timeout=_remaining_timeout())
         except ElementNotFoundError:
             pass
-        return self.find_text(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+        return self.find_text(target_str, timeout=_remaining_timeout())
+
 
     def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
         """Fill multiple form inputs, textareas, selects, and checkboxes in a compound batch."""
@@ -1814,18 +1853,23 @@ class Tab:
             if handle is None:
                 raise ElementNotFoundError(target=key_str, tab_id=self.id, url=self.url)
 
+            is_radio = handle.is_radio
+
             if isinstance(value, bool):
                 try:
-                    is_checked = handle.eval_js("!!this.checked")
+                    is_checked = handle.eval_js("!!this.checked || this.getAttribute('aria-checked') === 'true'")
                 except Exception:
                     is_checked = False
                 if bool(is_checked) != value:
                     handle.click()
-            elif isinstance(value, list) or handle._tag_name == "select" or handle._role == "combobox":
+            elif is_radio:
+                handle.click()
+            elif isinstance(value, list) or handle.tag_name == "select" or handle.role == "combobox":
                 handle.select(str(value[0] if isinstance(value, list) else value))
             else:
                 handle.type(str(value), clear=True)
             filled_count += 1
+
 
         submitted = False
         if submit:
@@ -1869,17 +1913,22 @@ class Tab:
                         const parts = sel.split('@');
                         const subSel = parts[0].trim();
                         attrName = parts[1].trim();
-                        if (subSel && subSel !== '.' && subSel !== 'self') {{
+                        if (subSel && subSel !== '.' && subSel !== 'self' && subSel.toLowerCase() !== 'text') {{
                             targetEl = container.querySelector(subSel);
                         }}
-                    }} else if (sel && sel !== '.' && sel !== 'self') {{
+                    }} else if (sel && sel !== '.' && sel !== 'self' && sel.toLowerCase() !== 'text') {{
                         targetEl = container.querySelector(sel);
                     }}
 
                     if (!targetEl) {{
                         row[key] = "";
                     }} else if (attrName) {{
-                        row[key] = (targetEl.getAttribute(attrName) || targetEl[attrName] || "").toString().trim();
+                        if (attrName.toLowerCase() === 'text') {{
+                            row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                        }} else {{
+                            const val = targetEl.getAttribute(attrName);
+                            row[key] = (val !== null && val !== undefined ? val : "").toString().trim();
+                        }}
                     }} else {{
                         row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
                     }}
@@ -1896,21 +1945,26 @@ class Tab:
             return res["result"]
         return []
 
+    _SEARCH_ENGINES: Dict[str, str] = {
+        "google": "https://www.google.com/search?q={query}",
+        "g": "https://www.google.com/search?q={query}",
+        "bing": "https://www.bing.com/search?q={query}",
+        "b": "https://www.bing.com/search?q={query}",
+        "duckduckgo": "https://duckduckgo.com/?q={query}",
+        "ddg": "https://duckduckgo.com/?q={query}",
+        "youtube": "https://www.youtube.com/results?search_query={query}",
+        "yt": "https://www.youtube.com/results?search_query={query}",
+        "github": "https://github.com/search?q={query}",
+        "gh": "https://github.com/search?q={query}",
+    }
+
     def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
         """Execute search query via search engine shortcut."""
         import urllib.parse
         q_enc = urllib.parse.quote_plus(query)
         eng_lower = engine.lower().strip()
-        if eng_lower in ("google", "g"):
-            target_url = f"https://www.google.com/search?q={q_enc}"
-        elif eng_lower in ("bing", "b"):
-            target_url = f"https://www.bing.com/search?q={q_enc}"
-        elif eng_lower in ("duckduckgo", "ddg"):
-            target_url = f"https://duckduckgo.com/?q={q_enc}"
-        elif eng_lower in ("youtube", "yt"):
-            target_url = f"https://www.youtube.com/results?search_query={q_enc}"
-        elif eng_lower in ("github", "gh"):
-            target_url = f"https://github.com/search?q={q_enc}"
+        if eng_lower in self._SEARCH_ENGINES:
+            target_url = self._SEARCH_ENGINES[eng_lower].format(query=q_enc)
         elif "{query}" in engine:
             target_url = engine.replace("{query}", q_enc)
         elif engine.startswith("http://") or engine.startswith("https://"):
@@ -1928,10 +1982,12 @@ class Tab:
 
     def get_ambient_header(self) -> str:
         """Generate standardized ambient orientation header for this tab."""
-        tab_id_repr = f"#{self.id}" if self.id is not None else "#1"
         info = self.info if hasattr(self, "info") else {}
+        tid = self.id if self.id is not None else info.get("id")
+        tab_id_repr = f"#{tid}" if tid is not None else "#1"
         url = info.get("url") or getattr(self, "url", "") or "about:blank"
         title = info.get("title") or getattr(self, "title", "") or "Chrome"
+
 
         media_summary = "none"
         try:
@@ -2027,49 +2083,9 @@ class Chrome(Tab):
         """Check browser connection status."""
         return self._client.call("ping")
 
-    def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
-        """Polymorphically find element on active tab."""
-        return self.active_tab.find(target, timeout=timeout)
-
-    def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
-        """Find visible element by text on active tab."""
-        return self.active_tab.find_text(text, exact=exact, timeout=timeout)
-
-    def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
-        """Find input/textarea/select by placeholder or label on active tab."""
-        return self.active_tab.find_input(placeholder_or_label, timeout=timeout)
-
-    def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
-        """Find button by visible text on active tab."""
-        return self.active_tab.find_button(name, exact=exact, timeout=timeout)
-
-    def query_all(self, css_selector: str) -> List[ElementHandle]:
-        """Find all matching elements by CSS selector on active tab."""
-        return self.active_tab.query_all(css_selector)
-
-    def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
-        """Fill multiple form inputs and optionally submit on active tab."""
-        return self.active_tab.fill_form(mapping, submit=submit)
-
-    def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
-        """Extract structured items from repeated containers on active tab."""
-        return self.active_tab.extract_items(container_selector, fields)
-
-    def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
-        """Execute search query shortcut on active tab."""
-        return self.active_tab.search(query, engine=engine)
-
-    def get_ambient_header(self) -> str:
-        """Generate ambient orientation header for active tab."""
-        try:
-            return self.active_tab.get_ambient_header()
-        except Exception:
-            url = getattr(self, "url", "") or "about:blank"
-            title = getattr(self, "title", "") or "Chrome"
-            return f"[Active Tab: #1 | URL: {url} | Title: {title} | Media: none]"
-
 
 # Default global instance
 chrome = Chrome()
+
 
 

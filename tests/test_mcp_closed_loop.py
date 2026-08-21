@@ -40,6 +40,23 @@ def test_ambient_header_empty_script_output():
     assert "(executed successfully with no output)" in out
 
 
+def test_repl_session_defaults_to_include_ambient():
+    client = MagicMock()
+    client.call.side_effect = lambda action, params=None, timeout=None: {
+        "list_tabs": [{"id": 2, "title": "Portal", "url": "https://portal.example.com", "active": True}],
+        "execute_script": {"found": False, "playbackState": "none"},
+        "ping": {"status": "ok"},
+    }.get(action, {})
+
+    mock_chrome = Chrome(client=client)
+    # Instantiate session with default kwargs (include_ambient omitted)
+    session = PythonReplSession(globals_dict={"chrome": mock_chrome})
+    assert session.include_ambient is True
+    out = session.execute("val = 42")
+    assert "[Active Tab: #2 | URL: https://portal.example.com | Title: Portal | Media: none]" in out
+    assert "(executed successfully with no output)" in out
+
+
 def test_diagnostic_error_recovery_with_line_and_partial_stdout():
     client = MagicMock()
     client.call.side_effect = lambda action, params=None, timeout=None: {
@@ -85,6 +102,15 @@ def test_mcp_tool_description_and_schema_recipes():
     assert "search" in desc
     assert "chrome.media." in desc
 
+    # Verify FastMCP system instructions embed the 4 core recipes
+    instructions = mcp_server.mcp.instructions or ""
+    assert "Search & Scrape" in instructions
+    assert "Form Fill & Submit" in instructions
+    assert "Table / List Extraction" in instructions or "Table/List Extraction" in instructions
+    assert "extract_items" in instructions
+    assert "Media Control" in instructions
+
+
 
 def test_mcp_execute_python_wrapper():
     # Test mcp_server.execute_python function
@@ -111,3 +137,24 @@ def test_output_budget_formatter_structured_sections():
     assert "Intermediate output" in out
     assert "[candidate_matches]" in out
     assert "- [#5] (button 'Confirm')" in out
+
+
+def test_output_budget_formatter_strict_section_ordering():
+    formatter = OutputBudgetFormatter()
+    out = formatter.format_execution_result(
+        stdout="Intermediate output",
+        error="ElementNotFoundError: not found",
+        candidate_matches=[{"ref": "#5", "role": "button", "name": "Confirm"}],
+        auto_snapshot="<div role='main'>...</div>",
+        failing_line=3,
+        failing_code="chrome.find_button('Save').click()",
+        ambient_header="[Active Tab: #1 | URL: https://example.com | Title: Test | Media: none]",
+    )
+
+    error_idx = out.index("[error]")
+    stdout_idx = out.index("[partial_stdout]")
+    matches_idx = out.index("[candidate_matches]")
+    snapshot_idx = out.index("[diagnostic_auto_snapshot]")
+
+    assert error_idx < stdout_idx < matches_idx < snapshot_idx
+
