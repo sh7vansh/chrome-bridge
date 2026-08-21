@@ -373,11 +373,11 @@ async function handleAction(action, params) {
         const results = await chrome.scripting.executeScript({
           target: { tabId: targetId },
           world: 'MAIN',
-          func: (expression) => {
+          func: async (expression) => {
             if (expression === 'document.title') return document.title;
             if (expression === 'location.href' || expression === 'window.location.href') return window.location.href;
             try {
-              return (0, eval)(expression);
+              return await (0, eval)(expression);
             } catch (e) {
               return { __error: e.message };
             }

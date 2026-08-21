@@ -55,6 +55,74 @@ function __cb_tag(el) {
         value: el.value || ''
     };
 }
+
+function __cb_wait_for(finderFn, timeoutMs) {
+    timeoutMs = (typeof timeoutMs === 'number') ? timeoutMs : 1500;
+    try {
+        const immediate = finderFn();
+        if (immediate) return Promise.resolve(immediate);
+    } catch(e) {}
+    if (timeoutMs <= 0) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+        let timer = null;
+        let observer = null;
+        let rafId = null;
+
+        const cleanup = () => {
+            if (timer) clearTimeout(timer);
+            if (observer) observer.disconnect();
+            if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+        };
+
+        const check = () => {
+            try {
+                const found = finderFn();
+                if (found) {
+                    cleanup();
+                    resolve(found);
+                    return true;
+                }
+            } catch(e) {}
+            return false;
+        };
+
+        try {
+            if (typeof MutationObserver !== 'undefined') {
+                observer = new MutationObserver(() => {
+                    check();
+                });
+                const root = document.documentElement || document.body;
+                if (root) {
+                    observer.observe(root, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        characterData: true
+                    });
+                }
+            }
+        } catch(e) {}
+
+        if (typeof requestAnimationFrame === 'function') {
+            const loop = () => {
+                if (!check()) {
+                    rafId = requestAnimationFrame(loop);
+                }
+            };
+            rafId = requestAnimationFrame(loop);
+        }
+
+        timer = setTimeout(() => {
+            cleanup();
+            try {
+                resolve(finderFn());
+            } catch(e) {
+                resolve(null);
+            }
+        }, timeoutMs);
+    });
+}
 """
 
 
@@ -161,153 +229,287 @@ class DomCompiler:
         """
 
     @classmethod
-    def compile_find_css_js(cls, target_str: str) -> str:
-        """Generate JavaScript payload for locating a visible element by CSS selector."""
+    def compile_find_css_js(cls, target_str: str, timeout: float = 1.5) -> str:
+        """Generate JavaScript payload for locating a visible element by CSS selector with in-page synchronizer."""
+        timeout_ms = int((timeout or 1.5) * 1000)
         return f"""
-        (() => {{
+        (async () => {{
             {_DISCOVERY_HELPER_JS}
-            try {{
-                const el = document.querySelector({json.dumps(target_str)});
-                if (el && __cb_is_visible(el)) return __cb_tag(el);
-            }} catch (e) {{}}
-            return null;
+            return await __cb_wait_for(() => {{
+                try {{
+                    const el = document.querySelector({json.dumps(target_str)});
+                    if (el && __cb_is_visible(el)) return __cb_tag(el);
+                }} catch (e) {{}}
+                return null;
+            }}, {timeout_ms});
         }})()
         """
 
     @classmethod
-    def compile_text_finder_js(cls, text: str, exact: bool = False) -> str:
-        """Generate JavaScript payload for finding a visible element by inner or accessible text."""
+    def compile_text_finder_js(cls, text: str, exact: bool = False, timeout: float = 1.5) -> str:
+        """Generate JavaScript payload for finding a visible element by inner or accessible text with in-page synchronizer."""
+        timeout_ms = int((timeout or 1.5) * 1000)
         return f"""
-        (() => {{
+        (async () => {{
             {_DISCOVERY_HELPER_JS}
             const query = {json.dumps(text)};
             const exact = {json.dumps(exact)};
             const qLower = query.toLowerCase();
 
-            const candidates = [];
-            const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
-            for (const el of all) {{
-                if (!__cb_is_visible(el)) continue;
-                const txt = (el.innerText || el.textContent || '').trim();
-                if (!txt) continue;
-                const tLower = txt.toLowerCase();
-                
-                let match = false;
-                let score = 0;
-                if (exact) {{
-                    if (tLower === qLower) {{ match = true; score = 100; }}
-                }} else {{
-                    if (tLower === qLower) {{ match = true; score = 100; }}
-                    else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
+            return await __cb_wait_for(() => {{
+                const candidates = [];
+                const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
+                for (const el of all) {{
+                    if (!__cb_is_visible(el)) continue;
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
+                    
+                    let match = false;
+                    let score = 0;
+                    if (exact) {{
+                        if (tLower === qLower) {{ match = true; score = 100; }}
+                    }} else {{
+                        if (tLower === qLower) {{ match = true; score = 100; }}
+                        else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
+                    }}
+
+                    if (match) {{
+                        const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
+                        if (isInteractive) score += 30;
+                        score -= Math.min(20, el.children.length * 5);
+                        candidates.push({{ el, score }});
+                    }}
                 }}
 
-                if (match) {{
-                    const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
-                    if (isInteractive) score += 30;
-                    score -= Math.min(20, el.children.length * 5);
-                    candidates.push({{ el, score }});
-                }}
-            }}
-
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }}, {timeout_ms});
         }})()
         """
 
     @classmethod
-    def compile_input_finder_js(cls, placeholder_or_label: str) -> str:
-        """Generate JavaScript payload for finding an input, textarea, or select by placeholder, label, or name."""
+    def compile_input_finder_js(cls, placeholder_or_label: str, timeout: float = 1.5) -> str:
+        """Generate JavaScript payload for finding an input, textarea, or select by placeholder, label, or name with in-page synchronizer."""
+        timeout_ms = int((timeout or 1.5) * 1000)
         return f"""
-        (() => {{
+        (async () => {{
             {_DISCOVERY_HELPER_JS}
             const query = {json.dumps(placeholder_or_label)};
             const qLower = query.toLowerCase();
 
-            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
-            const candidates = [];
+            return await __cb_wait_for(() => {{
+                const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+                const candidates = [];
 
-            for (const el of inputs) {{
-                if (!__cb_is_visible(el)) continue;
-                let score = 0;
+                for (const el of inputs) {{
+                    if (!__cb_is_visible(el)) continue;
+                    let score = 0;
 
-                const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
-                if (placeholder === qLower) score = 100;
-                else if (placeholder.includes(qLower)) score = 80;
+                    const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
+                    if (placeholder === qLower) score = 100;
+                    else if (placeholder.includes(qLower)) score = 80;
 
-                const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
-                if (ariaLabel === qLower) score = Math.max(score, 95);
-                else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
+                    const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
+                    if (ariaLabel === qLower) score = Math.max(score, 95);
+                    else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
 
-                const name = (el.getAttribute('name') || '').trim().toLowerCase();
-                const id = (el.id || '').trim().toLowerCase();
-                if (name === qLower || id === qLower) score = Math.max(score, 90);
-                else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
+                    const name = (el.getAttribute('name') || '').trim().toLowerCase();
+                    const id = (el.id || '').trim().toLowerCase();
+                    if (name === qLower || id === qLower) score = Math.max(score, 90);
+                    else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
 
-                if (el.id) {{
-                    try {{
-                        const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-                        if (labelEl) {{
-                            const lText = labelEl.innerText.trim().toLowerCase();
-                            if (lText === qLower) score = Math.max(score, 95);
-                            else if (lText.includes(qLower)) score = Math.max(score, 75);
-                        }}
-                    }} catch (e) {{}}
+                    if (el.id) {{
+                        try {{
+                            const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                            if (labelEl) {{
+                                const lText = labelEl.innerText.trim().toLowerCase();
+                                if (lText === qLower) score = Math.max(score, 95);
+                                else if (lText.includes(qLower)) score = Math.max(score, 75);
+                            }}
+                        }} catch (e) {{}}
+                    }}
+                    const parentLabel = el.closest('label');
+                    if (parentLabel) {{
+                        const lText = parentLabel.innerText.trim().toLowerCase();
+                        if (lText === qLower) score = Math.max(score, 90);
+                        else if (lText.includes(qLower)) score = Math.max(score, 70);
+                    }}
+
+                    if (score > 0) {{
+                        candidates.push({{ el, score }});
+                    }}
                 }}
-                const parentLabel = el.closest('label');
-                if (parentLabel) {{
-                    const lText = parentLabel.innerText.trim().toLowerCase();
-                    if (lText === qLower) score = Math.max(score, 90);
-                    else if (lText.includes(qLower)) score = Math.max(score, 70);
-                }}
 
-                if (score > 0) {{
-                    candidates.push({{ el, score }});
-                }}
-            }}
-
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }}, {timeout_ms});
         }})()
         """
 
     @classmethod
-    def compile_button_finder_js(cls, name: str, exact: bool = False) -> str:
-        """Generate JavaScript payload for finding a button or clickable role by visible name."""
+    def compile_button_finder_js(cls, name: str, exact: bool = False, timeout: float = 1.5) -> str:
+        """Generate JavaScript payload for finding a button or clickable role by visible name with in-page synchronizer."""
+        timeout_ms = int((timeout or 1.5) * 1000)
         return f"""
-        (() => {{
+        (async () => {{
             {_DISCOVERY_HELPER_JS}
             const query = {json.dumps(name)};
             const exact = {json.dumps(exact)};
             const qLower = query.toLowerCase();
 
-            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
-            const candidates = [];
+            return await __cb_wait_for(() => {{
+                const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
+                const candidates = [];
 
-            for (const el of buttons) {{
-                if (!__cb_is_visible(el)) continue;
-                const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
-                if (!txt) continue;
-                const tLower = txt.toLowerCase();
+                for (const el of buttons) {{
+                    if (!__cb_is_visible(el)) continue;
+                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
 
-                let score = 0;
-                if (exact) {{
-                    if (tLower === qLower) score = 100;
-                }} else {{
-                    if (tLower === qLower) score = 100;
-                    else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
+                    let score = 0;
+                    if (exact) {{
+                        if (tLower === qLower) score = 100;
+                    }} else {{
+                        if (tLower === qLower) score = 100;
+                        else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
+                    }}
+
+                    if (score > 0) {{
+                        if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
+                        candidates.push({{ el, score }});
+                    }}
                 }}
 
-                if (score > 0) {{
-                    if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
-                    candidates.push({{ el, score }});
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }}, {timeout_ms});
+        }})()
+        """
+
+    @classmethod
+    def compile_fill_form_js(cls, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> str:
+        """Generate single-roundtrip JavaScript payload to fill an entire form and optionally submit."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const mapping = {json.dumps(mapping)};
+            const submit = {json.dumps(submit)};
+            let filledCount = 0;
+            const errors = [];
+
+            function findField(key) {{
+                if (key.startsWith('[#') || key.startsWith('#') || key.startsWith('.') || key.startsWith('input') || key.startsWith('[data-')) {{
+                    try {{
+                        const el = document.querySelector(key);
+                        if (el && __cb_is_visible(el)) return el;
+                    }} catch(e) {{}}
+                }}
+                const qLower = key.toLowerCase();
+                const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+                let best = null;
+                let bestScore = 0;
+                for (const el of inputs) {{
+                    if (!__cb_is_visible(el)) continue;
+                    let score = 0;
+                    const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+                    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                    const nm = (el.getAttribute('name') || '').toLowerCase();
+                    const id = (el.id || '').toLowerCase();
+                    if (ph === qLower || aria === qLower || nm === qLower || id === qLower) score = 100;
+                    else if (ph.includes(qLower) || aria.includes(qLower) || nm.includes(qLower)) score = 70;
+                    
+                    if (el.id) {{
+                        try {{
+                            const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                            if (l && (l.innerText.toLowerCase() === qLower || l.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 95);
+                        }} catch(e) {{}}
+                    }}
+                    const pLabel = el.closest('label');
+                    if (pLabel && (pLabel.innerText.toLowerCase() === qLower || pLabel.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 90);
+
+                    if (score > bestScore) {{
+                        bestScore = score;
+                        best = el;
+                    }}
+                }}
+                return best;
+            }}
+
+            for (const [key, value] of Object.entries(mapping)) {{
+                const el = findField(key);
+                if (!el) {{
+                    errors.push({{ field: key, error: "Field not found" }});
+                    continue;
+                }}
+                const tag = el.tagName.toLowerCase();
+                const type = (el.type || '').toLowerCase();
+                const role = (el.getAttribute('role') || '').toLowerCase();
+
+                if (typeof value === 'boolean') {{
+                    const isChecked = !!el.checked || el.getAttribute('aria-checked') === 'true';
+                    if (isChecked !== value) {{
+                        el.click();
+                    }}
+                }} else if (type === 'radio' || role === 'radio') {{
+                    el.click();
+                }} else if (tag === 'select' || role === 'combobox' || Array.isArray(value)) {{
+                    const targetVal = String(Array.isArray(value) ? value[0] : value);
+                    let foundOption = false;
+                    if (el.options) {{
+                        for (let i = 0; i < el.options.length; i++) {{
+                            if (el.options[i].value === targetVal || el.options[i].text.trim() === targetVal) {{
+                                el.selectedIndex = i;
+                                foundOption = true;
+                                break;
+                            }}
+                        }}
+                    }}
+                    if (!foundOption) el.value = targetVal;
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }} else {{
+                    el.focus();
+                    el.value = String(value);
+                    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+                filledCount++;
+            }}
+
+            let submitted = false;
+            if (submit) {{
+                if (submit === true || String(submit).toLowerCase() === 'enter') {{
+                    const form = document.querySelector('form');
+                    if (form) {{
+                        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                        else form.submit();
+                        submitted = true;
+                    }}
+                }} else {{
+                    const submitStr = String(submit).toLowerCase();
+                    const buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a.btn');
+                    for (const b of buttons) {{
+                        if (!__cb_is_visible(b)) continue;
+                        const txt = (b.innerText || b.value || b.getAttribute('aria-label') || '').trim().toLowerCase();
+                        if (txt === submitStr || txt.includes(submitStr)) {{
+                            b.click();
+                            submitted = true;
+                            break;
+                        }}
+                    }}
                 }}
             }}
 
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
+            return {{
+                success: errors.length === 0,
+                filled: filledCount,
+                submitted: submitted,
+                errors: errors
+            }};
         }})()
         """
 

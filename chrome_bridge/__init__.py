@@ -37,6 +37,43 @@ from .compiler import (
     DomBatchSynthesizer,
     DomCompiler,
 )
+from .ui import (
+    SpinnerContext,
+    TerminalUI,
+    ui,
+)
+from .manifests import (
+    BrowserInfo,
+    detect_installed_browsers,
+    detect_running_browsers,
+    generate_host_launcher,
+    get_browser_manifest_targets,
+    install_agent_skill,
+    register_browser_manifests,
+    resolve_extension_dir,
+    resolve_home_dir,
+    resolve_install_dir,
+    resolve_python_executable,
+    sync_runtime_files,
+)
+from .mcp_config import (
+    MCPClientInfo,
+    check_mcp_configs_health,
+    configure_all_mcp_clients,
+    detect_mcp_clients,
+    repair_mcp_config,
+    update_mcp_client_config,
+)
+from .doctor import (
+    check_file_permissions,
+    check_stale_ipc,
+    run_cleanup,
+    run_doctor,
+    run_status,
+    run_test_ping,
+    simulate_native_host,
+    wait_for_extension_handshake,
+)
 
 __all__ = [
     "ChromeBridgeError",
@@ -66,4 +103,34 @@ __all__ = [
     "ChromeSocketClient",
     "DomCompiler",
     "DomBatchSynthesizer",
+    "TerminalUI",
+    "SpinnerContext",
+    "ui",
+    "BrowserInfo",
+    "MCPClientInfo",
+    "resolve_home_dir",
+    "resolve_install_dir",
+    "resolve_extension_dir",
+    "resolve_python_executable",
+    "sync_runtime_files",
+    "generate_host_launcher",
+    "detect_running_browsers",
+    "get_browser_manifest_targets",
+    "detect_installed_browsers",
+    "register_browser_manifests",
+    "install_agent_skill",
+    "detect_mcp_clients",
+    "update_mcp_client_config",
+    "configure_all_mcp_clients",
+    "repair_mcp_config",
+    "check_mcp_configs_health",
+    "simulate_native_host",
+    "wait_for_extension_handshake",
+    "check_stale_ipc",
+    "check_file_permissions",
+    "run_doctor",
+    "run_status",
+    "run_cleanup",
+    "run_test_ping",
 ]
+

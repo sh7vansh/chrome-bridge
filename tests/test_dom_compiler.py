@@ -95,3 +95,33 @@ def test_dom_compiler_decode_error_timeout():
     assert exc.timeout == 5.0
     assert exc.ready_state == "interactive"
     assert "Timed out after 5.0s" in str(exc)
+
+
+def test_dom_compiler_in_page_synchronizer():
+    """Verify in-page event-driven DOM synchronizer with MutationObserver."""
+    js_text = DomCompiler.compile_text_finder_js("Checkout", exact=False, timeout=2.0)
+    assert "__cb_wait_for" in js_text
+    assert "MutationObserver" in js_text
+    assert "2000" in js_text
+    assert "requestAnimationFrame" in js_text
+
+    js_css = DomCompiler.compile_find_css_js("button.primary", timeout=3.5)
+    assert "__cb_wait_for" in js_css
+    assert "3500" in js_css
+
+
+def test_dom_compiler_compile_fill_form_js():
+    """Verify single-roundtrip batch form compiler."""
+    mapping = {
+        "First Name": "John",
+        "Subscribe": True,
+        "Plan": "pro",
+    }
+    js_form = DomCompiler.compile_fill_form_js(mapping, submit="Register")
+    assert 'const mapping = {"First Name": "John", "Subscribe": true, "Plan": "pro"};' in js_form
+    assert 'const submit = "Register";' in js_form
+    assert "findField" in js_form
+    assert "filledCount++" in js_form
+    assert "dispatchEvent(new Event('input'" in js_form
+    assert "dispatchEvent(new Event('change'" in js_form
+
