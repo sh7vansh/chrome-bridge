@@ -1,4 +1,37 @@
-"""Synchronous Python SDK and IPC Client for Chrome Bridge."""
+r"""Synchronous Python SDK and IPC Client for Chrome Bridge.
+
+Persistent Python REPL Runtime for AI Browser Automation.
+
+Standard Composition Lifecycle:
+===============================
+1. Orientation:
+   >>> from chrome_sdk import chrome
+   >>> snapshot = chrome.snapshot()
+   >>> print(snapshot)
+   # Inspect the returned Semantic DOM outline to discover element Ref-IDs:
+   # [#1] <input type="text" placeholder="Search Google">
+   # [#2] <button type="submit">Google Search</button>
+
+2. Targeted Actions:
+   # Interact using Ref-IDs, integer tokens, or CSS selectors
+   >>> chrome.type("[#1]", "Claude Sonnet", press_enter=True)
+
+3. Synchronization:
+   # Wait for URL transition or dynamic element appearance
+   >>> chrome.wait_for_url(r"search\?q=")
+   >>> chrome.wait_for("[#search-results]", timeout=10.0)
+
+4. Extraction & Subroutines:
+   # Extract text or run JavaScript in page context
+   >>> titles = chrome.eval_js('''
+   ...     Array.from(document.querySelectorAll('h3')).map(e => e.innerText)
+   ... ''')
+   >>> print("Extracted Titles:", titles)
+
+5. Fast Media Control (Zero-DOM):
+   >>> status = chrome.media.status()
+   >>> chrome.media.toggle()
+"""
 
 import contextlib
 import json
@@ -27,8 +60,15 @@ if sys.platform == "win32":
 DEFAULT_SOCKET_PATH = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
 DEFAULT_PORT_FILE = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
 SOCKET_PATH = DEFAULT_SOCKET_PATH
-PORT_FILE = DEFAULT_PORT_FILE
 TargetLocator = Union[int, str]
+"""Target locator for DOM elements.
+
+Accepts:
+- int: Integer Ref-ID from snapshot (e.g. 14)
+- str: Bracketed Ref-ID token (e.g. "[#14]")
+- str: Hash Ref-ID token (e.g. "#14")
+- str: Standard CSS selector (e.g. "button.submit", "input[name='q']", "#main-btn")
+"""
 
 
 def resolve_runtime_directory() -> str:
@@ -238,7 +278,19 @@ class ChromeBridgeWorkerTelemetry:
 
 
 class SafetyController:
-    """Zero-overhead safety and origin governance controller."""
+    """Zero-overhead safety and origin governance controller.
+
+    Enforces origin locking to prevent redirection-based data exfiltration and
+    hardcoded deletion safety valves to prevent catastrophic accidental actions.
+
+    Example:
+        >>> # Explicitly allow navigation to an external API origin
+        >>> chrome.safety.allow_origin("https://api.github.com")
+        >>> 
+        >>> # Temporarily permit destructive actions if explicitly instructed by the user
+        >>> with chrome.safety.permit_destructive():
+        ...     chrome.click("[#delete-button]")
+    """
 
     def __init__(self):
         self._permit_destructive_depth = 0
@@ -246,6 +298,15 @@ class SafetyController:
 
     @contextlib.contextmanager
     def permit_destructive(self):
+        """Context manager to temporarily bypass destructive action safety valves.
+
+        Must be used when the user explicitly requests account deletion,
+        repository deletion, or data purge actions.
+
+        Example:
+            >>> with chrome.safety.permit_destructive():
+            ...     chrome.click("[#confirm-delete]")
+        """
         self._permit_destructive_depth += 1
         try:
             yield
@@ -254,14 +315,24 @@ class SafetyController:
 
     @property
     def is_destructive_permitted(self) -> bool:
+        """Return True if destructive operations are currently permitted within a context manager."""
         return self._permit_destructive_depth > 0
 
     def allow_origin(self, url_or_domain: str) -> None:
+        """Allow navigations to the specified hostname or domain.
+
+        Args:
+            url_or_domain: Domain string or full URL (e.g. 'api.github.com' or 'https://example.com').
+
+        Example:
+            >>> chrome.safety.allow_origin("subdomain.example.com")
+        """
         host = _extract_hostname(url_or_domain)
         if host:
             self._allowed_origins.add(host.lower())
 
     def is_origin_allowed(self, host: str, tab_origins: Optional[set] = None) -> bool:
+        """Check whether a given hostname is permitted under current task scope and SSO allowlists."""
         if not host or host in ("about:blank", "localhost", "127.0.0.1"):
             return True
         h = host.lower()
@@ -647,7 +718,25 @@ class ChromeSocketClient:
 
 
 class TabMedia:
-    """Fast-path media controller attached to a Tab instance."""
+    """Fast-path media controller attached to a Tab instance.
+
+    Provides zero-DOM-overhead media control for HTML5 <video> / <audio> elements
+    and the browser MediaSession API. Directly penetrates open shadow roots (e.g.
+    YouTube, Spotify, Netflix web players) without generating expensive DOM snapshots.
+
+    Example:
+        >>> # Check playback state and metadata
+        >>> print(chrome.media.status())
+        >>> 
+        >>> # Toggle play/pause
+        >>> chrome.media.toggle()
+        >>> 
+        >>> # Relative seek (+15s forward or -10s backward)
+        >>> chrome.media.seek(15.0)
+        >>> 
+        >>> # Set volume level
+        >>> chrome.media.set_volume(0.8)
+    """
 
     _FIND_MEDIA_JS = """
     function findMediaElement(root = document) {
@@ -668,7 +757,17 @@ class TabMedia:
         self._tab = tab
 
     def status(self) -> Dict[str, Any]:
-        """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs."""
+        """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs.
+
+        Returns:
+            Dict containing `found` (bool), `paused` (bool), `currentTime` (float),
+            `duration` (float), `volume` (float), `muted` (bool), `title` (str),
+            `artist` (str), `album` (str), and `playbackState` ('playing', 'paused', 'none').
+
+        Example:
+            >>> state = chrome.media.status()
+            >>> print(f"Now playing: {state.get('title')} (paused: {state.get('paused')})")
+        """
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -692,7 +791,14 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def toggle(self) -> Dict[str, Any]:
-        """Toggle play/pause on the active media element."""
+        """Toggle play/pause on the active media element.
+
+        Returns:
+            Dict with `success` (bool) and `action` ('played' or 'paused').
+
+        Example:
+            >>> chrome.media.toggle()
+        """
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -710,7 +816,11 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def play(self) -> Dict[str, Any]:
-        """Play active media element."""
+        """Resume playback on the active media element.
+
+        Example:
+            >>> chrome.media.play()
+        """
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -722,7 +832,11 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def pause(self) -> Dict[str, Any]:
-        """Pause active media element."""
+        """Pause playback on the active media element.
+
+        Example:
+            >>> chrome.media.pause()
+        """
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -734,7 +848,18 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def seek(self, seconds: float) -> Dict[str, Any]:
-        """Seek relative (+/- seconds) or absolute position."""
+        """Seek relative (+/- seconds) or step playback time.
+
+        Args:
+            seconds: Relative time delta in seconds (e.g. +15.0 to skip ahead, -10.0 to rewind).
+
+        Returns:
+            Dict with `success` (bool) and updated `currentTime` (float).
+
+        Example:
+            >>> chrome.media.seek(15.0)  # Skip 15s forward
+            >>> chrome.media.seek(-10.0) # Rewind 10s
+        """
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -747,7 +872,14 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def set_volume(self, volume: float) -> Dict[str, Any]:
-        """Set volume level between 0.0 and 1.0."""
+        """Set media volume level between 0.0 (muted) and 1.0 (max).
+
+        Args:
+            volume: Float volume value from 0.0 to 1.0.
+
+        Example:
+            >>> chrome.media.set_volume(0.75)
+        """
         volume = max(0.0, min(1.0, float(volume)))
         js = f"""
         (() => {{
@@ -761,7 +893,18 @@ class TabMedia:
 
 
 class Tab:
-    """Scoped browser tab handle and procedural action context."""
+    """Scoped browser tab handle and procedural action context.
+
+    Provides high-level DOM interactions, Ref-ID resolution, navigation,
+    and media fast-paths scoped to a single browser tab.
+
+    Example Workflow:
+        >>> tab = chrome.active_tab
+        >>> print(tab.snapshot())
+        >>> tab.type("[#search_bar]", "Documentation", press_enter=True)
+        >>> tab.wait_for_url(r"/docs")
+        >>> data = tab.get_text("[#content]")
+    """
 
     def __init__(
         self,
@@ -919,7 +1062,24 @@ class Tab:
         return self._client.call("go_forward", {"tabId": self.id})
 
     def snapshot(self, compact: bool = True, wrap: bool = True) -> str:
-        """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs."""
+        """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs.
+
+        Produces an accessible outline of interactive elements, tagging each with
+        an integer Ref-ID (e.g., `[#1]`, `[#2]`).
+
+        Args:
+            compact: If True, filters out non-interactive layout noise.
+            wrap: If True, wraps output in <UNTRUSTED_EXTERNAL_DATA> security boundaries.
+
+        Returns:
+            Formatted semantic snapshot string.
+
+        Example:
+            >>> print(chrome.snapshot())
+            # Output:
+            # [#1] <input type="text" placeholder="Search Google">
+            # [#2] <button type="submit">Search</button>
+        """
         res = self._client.call("get_page_content", {"tabId": self.id, "compact": compact})
         raw = res.get("snapshot", "") if isinstance(res, dict) else str(res)
         if wrap:
@@ -933,7 +1093,23 @@ class Tab:
         count: int = 1,
         safety_check: bool = True,
     ) -> Dict[str, Any]:
-        """Click an element by Ref-ID or CSS selector."""
+        """Click an element identified by Ref-ID or CSS selector.
+
+        Args:
+            target: Element locator. Accepts integer Ref-ID (`14`), bracketed Ref-ID (`"[#14]"`),
+                hash Ref-ID (`"#14"`), or CSS selector (`"button.submit"`, `"#search-btn"`).
+            button: Mouse button ('left', 'right', 'middle'). Default is 'left'.
+            count: Click count (1 for single click, 2 for double click).
+            safety_check: If True, blocks clicks matching critical destructive terms.
+
+        Returns:
+            Dict containing action response telemetry.
+
+        Examples:
+            >>> chrome.click(14)
+            >>> chrome.click("[#14]")
+            >>> chrome.click("button.submit-form")
+        """
         self._safety_check_action("click", target, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
@@ -950,7 +1126,20 @@ class Tab:
         press_enter: bool = False,
         safety_check: bool = True,
     ) -> Dict[str, Any]:
-        """Type text into an input or contenteditable element."""
+        """Type text into an input, textarea, or contenteditable element.
+
+        Args:
+            target: Element locator (e.g. `2`, `"[#2]"`, or `"input[name='q']"`).
+            text: Text string to type.
+            clear: If True, clears existing content before typing. Default is True.
+            press_enter: If True, simulates pressing Enter key after typing. Default is False.
+            safety_check: If True, checks safety policies against typed text.
+
+        Examples:
+            >>> chrome.type("[#2]", "Claude Sonnet", press_enter=True)
+            >>> chrome.type(2, "search query", clear=True)
+            >>> chrome.type("input[type='search']", "Python SDK")
+        """
         self._safety_check_action("type", target, text=text, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
@@ -966,29 +1155,77 @@ class Tab:
         )
 
     def press_key(self, key: str, safety_check: bool = True) -> Dict[str, Any]:
-        """Press a keyboard key."""
+        """Press a keyboard key (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown').
+
+        Args:
+            key: Key identifier name.
+            safety_check: If True, checks safety policies against the action.
+
+        Example:
+            >>> chrome.press_key("Enter")
+            >>> chrome.press_key("Escape")
+        """
         self._safety_check_action("press_key", key, safety_check=safety_check)
         return self._client.call("press_key", {"key": key, "tabId": self.id})
 
     def select(self, target: TargetLocator, value: str, safety_check: bool = True) -> Dict[str, Any]:
-        """Select an option in a dropdown."""
+        """Select an option in a <select> dropdown by value or label.
+
+        Args:
+            target: Element locator (e.g. `5`, `"[#5]"`, or `"select#country"`).
+            value: Option value or visible text to select.
+            safety_check: If True, checks safety policies against the action.
+
+        Example:
+            >>> chrome.select("[#5]", "US")
+            >>> chrome.select("select#country", "United States")
+        """
         self._safety_check_action("select", target, text=value, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id})
 
     def hover(self, target: TargetLocator) -> Dict[str, Any]:
-        """Hover mouse over an element."""
+        """Hover mouse pointer over an element to trigger tooltips or dropdown menus.
+
+        Args:
+            target: Element locator (e.g. `8`, `"[#8]"`, or `".dropdown-trigger"`).
+
+        Example:
+            >>> chrome.hover("[#8]")
+        """
         loc = normalize_locator(target)
         return self._client.call("hover", {"target": loc, "tabId": self.id})
 
     def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
-        """Scroll the page or a specific container."""
+        """Scroll the window or a specific scrollable container.
+
+        Args:
+            x: Horizontal pixel delta to scroll.
+            y: Vertical pixel delta to scroll. Default is 500.
+            target: Optional container locator to scroll within.
+
+        Example:
+            >>> chrome.scroll(y=800)
+            >>> chrome.scroll(y=300, target="[#feed-container]")
+        """
         self._action_tracker.record_and_validate("scroll", target, self.url, tab_id=self.id)
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("scroll", {"x": x, "y": y, "target": loc, "tabId": self.id})
 
     def get_text(self, target: TargetLocator, wrap: bool = True) -> str:
-        """Get inner text of an element."""
+        """Extract inner text content of an element.
+
+        Args:
+            target: Element locator (e.g. `3`, `"[#3]"`, or `"article.post"`).
+            wrap: If True, encloses extracted text in <UNTRUSTED_EXTERNAL_DATA> tags.
+
+        Returns:
+            Extracted text content string.
+
+        Example:
+            >>> text = chrome.get_text("[#3]")
+            >>> print(text)
+        """
         loc = normalize_locator(target)
         res = self._client.call("get_text", {"target": loc, "tabId": self.id})
         raw = res.get("text", "") if isinstance(res, dict) else str(res)
@@ -997,23 +1234,68 @@ class Tab:
         return raw
 
     def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
-        """Get DOM attribute value."""
+        """Retrieve the value of an element DOM attribute.
+
+        Args:
+            target: Element locator (e.g. `3`, `"[#3]"`, or `"a.download"`).
+            name: Name of the attribute (e.g. 'href', 'src', 'data-id').
+
+        Returns:
+            Attribute value as a string, or None if not found.
+
+        Example:
+            >>> link = chrome.get_attribute("[#3]", "href")
+        """
         loc = normalize_locator(target)
         res = self._client.call("get_attribute", {"target": loc, "name": name, "tabId": self.id})
         return res.get("value") if isinstance(res, dict) else None
 
     def eval_js(self, script: str, target: Optional[TargetLocator] = None) -> Any:
-        """Execute JavaScript in page context."""
+        """Execute JavaScript directly in the active tab context.
+
+        Args:
+            script: JavaScript source string to evaluate.
+            target: Optional element locator. If provided, `this` in script references the element.
+
+        Returns:
+            JSON-serializable result of the JavaScript execution.
+
+        Example:
+            >>> title = chrome.eval_js("document.title")
+            >>> items = chrome.eval_js("Array.from(document.querySelectorAll('h3')).map(e => e.innerText)")
+        """
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("execute_script", {"code": script, "target": loc, "tabId": self.id})
 
     def screenshot(self, path: Optional[str] = None) -> str:
-        """Capture page screenshot."""
+        """Capture a page screenshot.
+
+        Args:
+            path: Optional filesystem path to save the PNG image.
+
+        Returns:
+            Base64 PNG data URL string.
+
+        Example:
+            >>> data_url = chrome.screenshot()
+        """
         res = self._client.call("screenshot", {"path": path, "tabId": self.id})
         return res.get("dataUrl") or res.get("data", "")
 
     def wait_for(self, target: TargetLocator, timeout: float = 10.0, state: str = "visible") -> bool:
-        """Synchronously wait for an element to reach the desired state ('visible', 'hidden', 'attached')."""
+        """Synchronously wait for an element to reach a target lifecycle state.
+
+        Args:
+            target: Element locator (e.g. `10`, `"[#10]"`, or `"#results"`).
+            timeout: Maximum seconds to wait before timing out. Default is 10.0.
+            state: Expected element condition: 'visible', 'hidden', or 'attached'.
+
+        Returns:
+            True if element reached the state within timeout.
+
+        Example:
+            >>> chrome.wait_for("[#10]", timeout=5.0, state="visible")
+        """
         loc = normalize_locator(target)
         return self._client.call(
             "wait_for",
@@ -1022,16 +1304,74 @@ class Tab:
         )
 
     def wait_for_url(self, pattern: str, timeout: float = 15.0) -> bool:
-        """Synchronously wait for current URL to match regex pattern."""
+        r"""Synchronously wait for current URL to match a regex pattern.
+
+        Args:
+            pattern: Regex pattern to match against current URL.
+            timeout: Maximum seconds to wait before timing out. Default is 15.0.
+
+        Returns:
+            True if URL matches pattern within timeout.
+
+        Example:
+            >>> chrome.wait_for_url(r"github\\.com/settings")
+        """
         return self._client.call(
             "wait_for_url",
             {"pattern": pattern, "timeout": timeout, "tabId": self.id},
             timeout=timeout + 3.0,
         )
 
+    def help(self) -> str:
+        """Return a formatted quick reference of available SDK methods and examples."""
+        return (
+            "Chrome Bridge SDK Quick Reference:\n"
+            "==================================\n"
+            "  DOM Orientation:\n"
+            "    chrome.snapshot(compact=True)     -> Outline with [#N] Ref-IDs\n\n"
+            "  Element Interactions (Target: [#N], int N, or 'css_selector'):\n"
+            "    chrome.click(target, button='left', count=1)\n"
+            "    chrome.type(target, 'text', clear=True, press_enter=False)\n"
+            "    chrome.select(target, 'value')\n"
+            "    chrome.hover(target)\n"
+            "    chrome.scroll(x=0, y=500, target=None)\n"
+            "    chrome.press_key('Enter')\n\n"
+            "  Extraction & Scripting:\n"
+            "    chrome.get_text(target)           -> Inner text in untrusted tags\n"
+            "    chrome.get_attribute(target, name)\n"
+            "    chrome.eval_js('document.title')\n"
+            "    chrome.screenshot(path=None)\n\n"
+            "  Tabs & Navigation:\n"
+            "    chrome.tabs, chrome.active_tab, chrome.get_tab(id), chrome.new_tab(url)\n"
+            "    chrome.navigate(url), chrome.reload(), chrome.back(), chrome.forward()\n\n"
+            "  Media Fast-Paths (Zero-DOM Shadow-Root Penetration):\n"
+            "    chrome.media.status()             -> Player state, title, artist, time\n"
+            "    chrome.media.toggle(), play(), pause()\n"
+            "    chrome.media.seek(15.0), chrome.media.set_volume(0.8)\n\n"
+            "  Safety & Governance:\n"
+            "    chrome.safety.allow_origin('api.example.com')\n"
+            "    with chrome.safety.permit_destructive(): ...\n"
+        )
+
 
 class Chrome(Tab):
-    """Global Chrome singleton providing fluent active tab control and tab management."""
+    """Global Chrome controller singleton and tab manager.
+
+    Acts as both a fluent handle to the currently active browser tab
+    and a manager for tab lifecycle (listing, switching, creating, closing).
+
+    Canonical Composition Lifecycle:
+        >>> from chrome_sdk import chrome
+        >>> # 1. Inspect open tabs
+        >>> print([f"{t.id}: {t.title}" for t in chrome.tabs])
+        >>> # 2. Orient on active page
+        >>> print(chrome.snapshot())
+        >>> # 3. Interact via discovered Ref-ID
+        >>> chrome.type("[#1]", "Hello World", press_enter=True)
+        >>> # 4. Synchronize and extract
+        >>> chrome.wait_for("[#results]")
+        >>> print(chrome.get_text("[#results]"))
+    """
 
     def __init__(self, client: Optional[ChromeSocketClient] = None):
         super().__init__(tab_id=None, client=client or ChromeSocketClient(), active=True)
