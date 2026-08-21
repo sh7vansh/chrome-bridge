@@ -938,6 +938,259 @@ function __cb_tag(el) {
 """
 
 
+class DomBatchSynthesizer:
+    """Pure compiler and code generation module for in-page compound batch operations and DOM discovery.
+
+    Translates high-level batch intents (element finding heuristics, structured data extraction,
+    and search engine shortcuts) into optimized, single-pass JavaScript execution payloads.
+    """
+
+    SEARCH_ENGINES: Dict[str, str] = {
+        "google": "https://www.google.com/search?q={query}",
+        "g": "https://www.google.com/search?q={query}",
+        "bing": "https://www.bing.com/search?q={query}",
+        "b": "https://www.bing.com/search?q={query}",
+        "duckduckgo": "https://duckduckgo.com/?q={query}",
+        "ddg": "https://duckduckgo.com/?q={query}",
+        "youtube": "https://www.youtube.com/results?search_query={query}",
+        "yt": "https://www.youtube.com/results?search_query={query}",
+        "github": "https://github.com/search?q={query}",
+        "gh": "https://github.com/search?q={query}",
+    }
+
+    @classmethod
+    def compile_search_url(cls, query: str, engine: str = "google") -> str:
+        """Resolve target search engine URL for a given query string."""
+        import urllib.parse
+        q_enc = urllib.parse.quote_plus(query)
+        eng_lower = engine.lower().strip()
+        if eng_lower in cls.SEARCH_ENGINES:
+            return cls.SEARCH_ENGINES[eng_lower].format(query=q_enc)
+        elif "{query}" in engine:
+            return engine.replace("{query}", q_enc)
+        elif engine.startswith("http://") or engine.startswith("https://"):
+            return f"{engine}?q={q_enc}" if "?" not in engine else f"{engine}&q={q_enc}"
+        else:
+            return f"https://www.google.com/search?q={q_enc}"
+
+    @classmethod
+    def compile_extract_items_js(cls, container_selector: str, fields: Dict[str, str]) -> str:
+        """Generate JavaScript payload for structured multi-field extraction across container elements."""
+        return f"""
+        (() => {{
+            const containerSelector = {json.dumps(container_selector)};
+            const fields = {json.dumps(fields)};
+            const containers = Array.from(document.querySelectorAll(containerSelector));
+            const results = [];
+
+            for (const container of containers) {{
+                const row = {{}};
+                for (const [key, fieldSel] of Object.entries(fields)) {{
+                    let targetEl = container;
+                    let attrName = null;
+                    let sel = (fieldSel || '').trim();
+
+                    if (sel.includes('@')) {{
+                        const parts = sel.split('@');
+                        const subSel = parts[0].trim();
+                        attrName = parts[1].trim();
+                        if (subSel && subSel !== '.' && subSel !== 'self' && subSel.toLowerCase() !== 'text') {{
+                            targetEl = container.querySelector(subSel);
+                        }}
+                    }} else if (sel && sel !== '.' && sel !== 'self' && sel.toLowerCase() !== 'text') {{
+                        targetEl = container.querySelector(sel);
+                    }}
+
+                    if (!targetEl) {{
+                        row[key] = "";
+                    }} else if (attrName) {{
+                        if (attrName.toLowerCase() === 'text') {{
+                            row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                        }} else {{
+                            const val = targetEl.getAttribute(attrName);
+                            row[key] = (val !== null && val !== undefined ? val : "").toString().trim();
+                        }}
+                    }} else {{
+                        row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                    }}
+                }}
+                results.push(row);
+            }}
+            return results;
+        }})()
+        """
+
+    @classmethod
+    def compile_query_all_js(cls, css_selector: str) -> str:
+        """Generate JavaScript payload for finding and tagging all visible elements matching a CSS selector."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const selector = {json.dumps(css_selector)};
+            const all = document.querySelectorAll(selector);
+            const results = [];
+            for (const el of all) {{
+                if (__cb_is_visible(el)) {{
+                    const tagged = __cb_tag(el);
+                    if (tagged) results.push(tagged);
+                }}
+            }}
+            return results;
+        }})()
+        """
+
+    @classmethod
+    def compile_find_css_js(cls, target_str: str) -> str:
+        """Generate JavaScript payload for locating a visible element by CSS selector."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            try {{
+                const el = document.querySelector({json.dumps(target_str)});
+                if (el && __cb_is_visible(el)) return __cb_tag(el);
+            }} catch (e) {{}}
+            return null;
+        }})()
+        """
+
+    @classmethod
+    def compile_text_finder_js(cls, text: str, exact: bool = False) -> str:
+        """Generate JavaScript payload for finding a visible element by inner or accessible text."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(text)};
+            const exact = {json.dumps(exact)};
+            const qLower = query.toLowerCase();
+
+            const candidates = [];
+            const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
+            for (const el of all) {{
+                if (!__cb_is_visible(el)) continue;
+                const txt = (el.innerText || el.textContent || '').trim();
+                if (!txt) continue;
+                const tLower = txt.toLowerCase();
+                
+                let match = false;
+                let score = 0;
+                if (exact) {{
+                    if (tLower === qLower) {{ match = true; score = 100; }}
+                }} else {{
+                    if (tLower === qLower) {{ match = true; score = 100; }}
+                    else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
+                }}
+
+                if (match) {{
+                    const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
+                    if (isInteractive) score += 30;
+                    score -= Math.min(20, el.children.length * 5);
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+    @classmethod
+    def compile_input_finder_js(cls, placeholder_or_label: str) -> str:
+        """Generate JavaScript payload for finding an input, textarea, or select by placeholder, label, or name."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(placeholder_or_label)};
+            const qLower = query.toLowerCase();
+
+            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+            const candidates = [];
+
+            for (const el of inputs) {{
+                if (!__cb_is_visible(el)) continue;
+                let score = 0;
+
+                const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
+                if (placeholder === qLower) score = 100;
+                else if (placeholder.includes(qLower)) score = 80;
+
+                const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
+                if (ariaLabel === qLower) score = Math.max(score, 95);
+                else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
+
+                const name = (el.getAttribute('name') || '').trim().toLowerCase();
+                const id = (el.id || '').trim().toLowerCase();
+                if (name === qLower || id === qLower) score = Math.max(score, 90);
+                else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
+
+                if (el.id) {{
+                    try {{
+                        const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                        if (labelEl) {{
+                            const lText = labelEl.innerText.trim().toLowerCase();
+                            if (lText === qLower) score = Math.max(score, 95);
+                            else if (lText.includes(qLower)) score = Math.max(score, 75);
+                        }}
+                    }} catch (e) {{}}
+                }}
+                const parentLabel = el.closest('label');
+                if (parentLabel) {{
+                    const lText = parentLabel.innerText.trim().toLowerCase();
+                    if (lText === qLower) score = Math.max(score, 90);
+                    else if (lText.includes(qLower)) score = Math.max(score, 70);
+                }}
+
+                if (score > 0) {{
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+    @classmethod
+    def compile_button_finder_js(cls, name: str, exact: bool = False) -> str:
+        """Generate JavaScript payload for finding a button or clickable role by visible name."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(name)};
+            const exact = {json.dumps(exact)};
+            const qLower = query.toLowerCase();
+
+            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
+            const candidates = [];
+
+            for (const el of buttons) {{
+                if (!__cb_is_visible(el)) continue;
+                const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+                if (!txt) continue;
+                const tLower = txt.toLowerCase();
+
+                let score = 0;
+                if (exact) {{
+                    if (tLower === qLower) score = 100;
+                }} else {{
+                    if (tLower === qLower) score = 100;
+                    else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
+                }}
+
+                if (score > 0) {{
+                    if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+
 class ElementHandle:
     """Handle to a resolved DOM element allowing fluent chained interactions.
 
@@ -1599,171 +1852,22 @@ class Tab:
 
     def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a visible DOM element by inner text or accessible content with dynamic micro-wait."""
-        import json
-        def _find():
-            js = f"""
-            (() => {{
-                {_DISCOVERY_HELPER_JS}
-                const query = {json.dumps(text)};
-                const exact = {json.dumps(exact)};
-                const qLower = query.toLowerCase();
-
-                const candidates = [];
-                const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
-                for (const el of all) {{
-                    if (!__cb_is_visible(el)) continue;
-                    const txt = (el.innerText || el.textContent || '').trim();
-                    if (!txt) continue;
-                    const tLower = txt.toLowerCase();
-                    
-                    let match = false;
-                    let score = 0;
-                    if (exact) {{
-                        if (tLower === qLower) {{ match = true; score = 100; }}
-                    }} else {{
-                        if (tLower === qLower) {{ match = true; score = 100; }}
-                        else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
-                    }}
-
-                    if (match) {{
-                        const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
-                        if (isInteractive) score += 30;
-                        score -= Math.min(20, el.children.length * 5);
-                        candidates.push({{ el, score }});
-                    }}
-                }}
-
-                if (candidates.length === 0) return null;
-                candidates.sort((a, b) => b.score - a.score);
-                return __cb_tag(candidates[0].el);
-            }})()
-            """
-            return self.eval_js(js)
-
-        return self._poll_find(_find, text, timeout=timeout)
+        js = DomBatchSynthesizer.compile_text_finder_js(text, exact=exact)
+        return self._poll_find(lambda: self.eval_js(js), text, timeout=timeout)
 
     def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
         """Find an input, textarea, or select element by placeholder, label, or name with micro-wait."""
-        import json
-        def _find():
-            js = f"""
-            (() => {{
-                {_DISCOVERY_HELPER_JS}
-                const query = {json.dumps(placeholder_or_label)};
-                const qLower = query.toLowerCase();
-
-                const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
-                const candidates = [];
-
-                for (const el of inputs) {{
-                    if (!__cb_is_visible(el)) continue;
-                    let score = 0;
-
-                    const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
-                    if (placeholder === qLower) score = 100;
-                    else if (placeholder.includes(qLower)) score = 80;
-
-                    const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
-                    if (ariaLabel === qLower) score = Math.max(score, 95);
-                    else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
-
-                    const name = (el.getAttribute('name') || '').trim().toLowerCase();
-                    const id = (el.id || '').trim().toLowerCase();
-                    if (name === qLower || id === qLower) score = Math.max(score, 90);
-                    else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
-
-                    if (el.id) {{
-                        try {{
-                            const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-                            if (labelEl) {{
-                                const lText = labelEl.innerText.trim().toLowerCase();
-                                if (lText === qLower) score = Math.max(score, 95);
-                                else if (lText.includes(qLower)) score = Math.max(score, 75);
-                            }}
-                        }} catch (e) {{}}
-                    }}
-                    const parentLabel = el.closest('label');
-                    if (parentLabel) {{
-                        const lText = parentLabel.innerText.trim().toLowerCase();
-                        if (lText === qLower) score = Math.max(score, 90);
-                        else if (lText.includes(qLower)) score = Math.max(score, 70);
-                    }}
-
-                    if (score > 0) {{
-                        candidates.push({{ el, score }});
-                    }}
-                }}
-
-                if (candidates.length === 0) return null;
-                candidates.sort((a, b) => b.score - a.score);
-                return __cb_tag(candidates[0].el);
-            }})()
-            """
-            return self.eval_js(js)
-
-        return self._poll_find(_find, placeholder_or_label, timeout=timeout)
+        js = DomBatchSynthesizer.compile_input_finder_js(placeholder_or_label)
+        return self._poll_find(lambda: self.eval_js(js), placeholder_or_label, timeout=timeout)
 
     def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a button, submit input, or clickable role by visible name with micro-wait."""
-        import json
-        def _find():
-            js = f"""
-            (() => {{
-                {_DISCOVERY_HELPER_JS}
-                const query = {json.dumps(name)};
-                const exact = {json.dumps(exact)};
-                const qLower = query.toLowerCase();
-
-                const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
-                const candidates = [];
-
-                for (const el of buttons) {{
-                    if (!__cb_is_visible(el)) continue;
-                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
-                    if (!txt) continue;
-                    const tLower = txt.toLowerCase();
-
-                    let score = 0;
-                    if (exact) {{
-                        if (tLower === qLower) score = 100;
-                    }} else {{
-                        if (tLower === qLower) score = 100;
-                        else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
-                    }}
-
-                    if (score > 0) {{
-                        if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
-                        candidates.push({{ el, score }});
-                    }}
-                }}
-
-                if (candidates.length === 0) return null;
-                candidates.sort((a, b) => b.score - a.score);
-                return __cb_tag(candidates[0].el);
-            }})()
-            """
-            return self.eval_js(js)
-
-        return self._poll_find(_find, name, timeout=timeout)
+        js = DomBatchSynthesizer.compile_button_finder_js(name, exact=exact)
+        return self._poll_find(lambda: self.eval_js(js), name, timeout=timeout)
 
     def query_all(self, css_selector: str) -> List[ElementHandle]:
         """Find all matching visible elements by CSS selector and return ElementHandles."""
-        import json
-        js = f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            const selector = {json.dumps(css_selector)};
-            const all = document.querySelectorAll(selector);
-            const results = [];
-            for (const el of all) {{
-                if (__cb_is_visible(el)) {{
-                    const tagged = __cb_tag(el);
-                    if (tagged) results.push(tagged);
-                }}
-            }}
-            return results;
-        }})()
-        """
+        js = DomBatchSynthesizer.compile_query_all_js(css_selector)
         res = self.eval_js(js)
         raw_items = res if isinstance(res, list) else (res.get("result") if isinstance(res, dict) and isinstance(res.get("result"), list) else [])
         results: List[ElementHandle] = []
@@ -1782,7 +1886,6 @@ class Tab:
                     )
         return results
 
-
     def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
         """Polymorphically find an element by Ref-ID, CSS selector, button name, input label, or text."""
         if isinstance(target, int):
@@ -1791,22 +1894,10 @@ class Tab:
         if target_str.startswith("[#") or (target_str.startswith("#") and target_str[1:].isdigit()):
             return ElementHandle(tab=self, target=target_str)
 
-        import json
         if any(target_str.startswith(c) for c in (".", "#", "[", ">", ":")) or " " in target_str:
-            def _find_css():
-                js = f"""
-                (() => {{
-                    {_DISCOVERY_HELPER_JS}
-                    try {{
-                        const el = document.querySelector({json.dumps(target_str)});
-                        if (el && __cb_is_visible(el)) return __cb_tag(el);
-                    }} catch (e) {{}}
-                    return null;
-                }})()
-                """
-                return self.eval_js(js)
+            js = DomBatchSynthesizer.compile_find_css_js(target_str)
             try:
-                return self._poll_find(_find_css, target_str, timeout=timeout)
+                return self._poll_find(lambda: self.eval_js(js), target_str, timeout=timeout)
             except ElementNotFoundError:
                 pass
 
@@ -1823,7 +1914,6 @@ class Tab:
         except ElementNotFoundError:
             pass
         return self.find_text(target_str, timeout=_remaining_timeout())
-
 
     def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
         """Fill multiple form inputs, textareas, selects, and checkboxes in a compound batch."""
@@ -1870,7 +1960,6 @@ class Tab:
                 handle.type(str(value), clear=True)
             filled_count += 1
 
-
         submitted = False
         if submit:
             if submit is True or str(submit).lower() == "enter":
@@ -1894,50 +1983,7 @@ class Tab:
 
     def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
         """Extract structured data rows and attributes across repeated container elements in a single JS pass."""
-        import json
-        js = f"""
-        (() => {{
-            const containerSelector = {json.dumps(container_selector)};
-            const fields = {json.dumps(fields)};
-            const containers = Array.from(document.querySelectorAll(containerSelector));
-            const results = [];
-
-            for (const container of containers) {{
-                const row = {{}};
-                for (const [key, fieldSel] of Object.entries(fields)) {{
-                    let targetEl = container;
-                    let attrName = null;
-                    let sel = (fieldSel || '').trim();
-
-                    if (sel.includes('@')) {{
-                        const parts = sel.split('@');
-                        const subSel = parts[0].trim();
-                        attrName = parts[1].trim();
-                        if (subSel && subSel !== '.' && subSel !== 'self' && subSel.toLowerCase() !== 'text') {{
-                            targetEl = container.querySelector(subSel);
-                        }}
-                    }} else if (sel && sel !== '.' && sel !== 'self' && sel.toLowerCase() !== 'text') {{
-                        targetEl = container.querySelector(sel);
-                    }}
-
-                    if (!targetEl) {{
-                        row[key] = "";
-                    }} else if (attrName) {{
-                        if (attrName.toLowerCase() === 'text') {{
-                            row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
-                        }} else {{
-                            const val = targetEl.getAttribute(attrName);
-                            row[key] = (val !== null && val !== undefined ? val : "").toString().trim();
-                        }}
-                    }} else {{
-                        row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
-                    }}
-                }}
-                results.push(row);
-            }}
-            return results;
-        }})()
-        """
+        js = DomBatchSynthesizer.compile_extract_items_js(container_selector, fields)
         res = self.eval_js(js)
         if isinstance(res, list):
             return res
@@ -1945,33 +1991,11 @@ class Tab:
             return res["result"]
         return []
 
-    _SEARCH_ENGINES: Dict[str, str] = {
-        "google": "https://www.google.com/search?q={query}",
-        "g": "https://www.google.com/search?q={query}",
-        "bing": "https://www.bing.com/search?q={query}",
-        "b": "https://www.bing.com/search?q={query}",
-        "duckduckgo": "https://duckduckgo.com/?q={query}",
-        "ddg": "https://duckduckgo.com/?q={query}",
-        "youtube": "https://www.youtube.com/results?search_query={query}",
-        "yt": "https://www.youtube.com/results?search_query={query}",
-        "github": "https://github.com/search?q={query}",
-        "gh": "https://github.com/search?q={query}",
-    }
+    _SEARCH_ENGINES: Dict[str, str] = DomBatchSynthesizer.SEARCH_ENGINES
 
     def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
         """Execute search query via search engine shortcut."""
-        import urllib.parse
-        q_enc = urllib.parse.quote_plus(query)
-        eng_lower = engine.lower().strip()
-        if eng_lower in self._SEARCH_ENGINES:
-            target_url = self._SEARCH_ENGINES[eng_lower].format(query=q_enc)
-        elif "{query}" in engine:
-            target_url = engine.replace("{query}", q_enc)
-        elif engine.startswith("http://") or engine.startswith("https://"):
-            target_url = f"{engine}?q={q_enc}" if "?" not in engine else f"{engine}&q={q_enc}"
-        else:
-            target_url = f"https://www.google.com/search?q={q_enc}"
-
+        target_url = DomBatchSynthesizer.compile_search_url(query, engine=engine)
         if target_url:
             self.safety.allow_origin(target_url)
             host = _extract_hostname(target_url)

@@ -129,3 +129,48 @@ def test_traceback_sanitization_removes_internal_frames():
     for forbidden in ["ChromeSocketClient", "_raise_structured_error", "socket.py", "net.connect"]:
         assert forbidden not in out, f"Internal frame '{forbidden}' leaked in output: {out}"
 
+
+def test_execution_outcome_and_diagnostic_report_rendering():
+    from repl_engine import ExecutionOutcome, DiagnosticReport, OutputBudgetFormatter, extract_diagnostic_report
+
+    formatter = OutputBudgetFormatter(max_chars=4000)
+    diag = DiagnosticReport(
+        failing_line=3,
+        failing_code="chrome.find('missing_btn').click()",
+        candidate_matches=[{"ref": "12", "role": "button", "name": "Submit Form"}],
+        auto_snapshot="[#1] <button>Submit Form</button>",
+    )
+    outcome = ExecutionOutcome(
+        stdout="Orientation step complete\n",
+        error="ElementNotFoundError: element not found",
+        diagnostic=diag,
+        ambient_header="[Active Tab: #1 | URL: https://example.com | Title: Test]",
+    )
+
+    rendered = formatter.render(outcome)
+    assert "[Active Tab: #1" in rendered
+    assert "[error]" in rendered
+    assert "Line 3: chrome.find('missing_btn').click()" in rendered
+    assert "[partial_stdout]" in rendered
+    assert "Orientation step complete" in rendered
+    assert "[candidate_matches]" in rendered
+    assert "- [#12] (button 'Submit Form')" in rendered
+    assert "[diagnostic_auto_snapshot]" in rendered
+    assert "[#1] <button>Submit Form</button>" in rendered
+
+
+def test_extract_diagnostic_report_helper():
+    from repl_engine import extract_diagnostic_report
+    from chrome_sdk import ElementNotFoundError
+
+    code = "x = 1\ny = 2\nraise ElementNotFoundError('btn', suggestions=[{'ref': '5', 'role': 'btn', 'name': 'OK'}])"
+    try:
+        exec(compile(code, "<repl>", "exec"))
+    except Exception as e:
+        diag = extract_diagnostic_report(e, code)
+        assert diag.failing_line == 3
+        assert "raise ElementNotFoundError" in diag.failing_code
+        assert len(diag.candidate_matches) == 1
+        assert diag.candidate_matches[0]["ref"] == "5"
+
+

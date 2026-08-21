@@ -200,3 +200,39 @@ def test_chrome_proxies_batch_helpers():
     assert client.call.call_args_list[1][0] == ("navigate", {"url": "https://duckduckgo.com/?q=test", "tabId": None})
 
 
+def test_dom_batch_synthesizer_search_urls():
+    from chrome_sdk import DomBatchSynthesizer
+    assert "google.com/search?q=hello+world" in DomBatchSynthesizer.compile_search_url("hello world", "google")
+    assert "duckduckgo.com/?q=python" in DomBatchSynthesizer.compile_search_url("python", "ddg")
+    assert "youtube.com/results?search_query=music" in DomBatchSynthesizer.compile_search_url("music", "yt")
+    assert "github.com/search?q=repo" in DomBatchSynthesizer.compile_search_url("repo", "gh")
+    assert "custom.org/find?query=test" in DomBatchSynthesizer.compile_search_url("test", "https://custom.org/find?query={query}")
+
+
+def test_dom_batch_synthesizer_js_compilation():
+    from chrome_sdk import DomBatchSynthesizer
+
+    extract_js = DomBatchSynthesizer.compile_extract_items_js(".card", {"title": "h2", "link": "a@href"})
+    assert ".card" in extract_js
+    assert "a@href" in extract_js
+    assert "getAttribute" in extract_js
+
+    query_all_js = DomBatchSynthesizer.compile_query_all_js("li.item")
+    assert "li.item" in query_all_js
+    assert "__cb_is_visible" in query_all_js
+
+    find_css_js = DomBatchSynthesizer.compile_find_css_js("#submit-btn")
+    assert "#submit-btn" in find_css_js
+
+    text_finder_js = DomBatchSynthesizer.compile_text_finder_js("Sign In", exact=True)
+    assert "Sign In" in text_finder_js
+    assert "qLower" in text_finder_js
+
+    input_finder_js = DomBatchSynthesizer.compile_input_finder_js("Search queries")
+    assert "Search queries" in input_finder_js
+    assert "placeholder" in input_finder_js
+
+    btn_finder_js = DomBatchSynthesizer.compile_button_finder_js("Submit Order")
+    assert "Submit Order" in btn_finder_js
+
+

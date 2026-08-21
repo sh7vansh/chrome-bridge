@@ -55,6 +55,71 @@ class ExecutionTimeoutContext:
 
 
 
+from dataclasses import dataclass, field
+
+
+@dataclass
+class DiagnosticReport:
+    """Structured domain payload encapsulating diagnostics upon execution failure."""
+    failing_line: Optional[int] = None
+    failing_code: Optional[str] = None
+    candidate_matches: Optional[List[Any]] = None
+    auto_snapshot: Optional[str] = None
+
+
+@dataclass
+class ExecutionOutcome:
+    """Cohesive domain representation of a Python REPL execution outcome."""
+    stdout: str = ""
+    stderr: str = ""
+    result: Any = None
+    has_result: bool = False
+    error: Optional[str] = None
+    diagnostic: Optional[DiagnosticReport] = None
+    ambient_header: Optional[str] = None
+
+
+def extract_diagnostic_report(
+    exc: BaseException,
+    code_str: str,
+    session_globals: Optional[Dict[str, Any]] = None,
+) -> DiagnosticReport:
+    """Extract failing frame line, candidate suggestions, and auto-snapshot from exception context."""
+    failing_line = None
+    failing_code = None
+    candidate_matches = None
+    auto_snapshot = None
+
+    if exc.__traceback__:
+        for frame in traceback.extract_tb(exc.__traceback__):
+            if frame.filename == "<repl>" and frame.lineno is not None:
+                failing_line = frame.lineno
+                lines = code_str.splitlines()
+                if 1 <= failing_line <= len(lines):
+                    failing_code = lines[failing_line - 1].strip()
+                break
+
+    if hasattr(exc, "suggestions") and getattr(exc, "suggestions"):
+        candidate_matches = getattr(exc, "suggestions")
+
+    if hasattr(exc, "auto_snapshot") and getattr(exc, "auto_snapshot"):
+        auto_snapshot = getattr(exc, "auto_snapshot")
+    elif isinstance(exc, ChromeBridgeError) and session_globals and "chrome" in session_globals:
+        chrome_inst = session_globals.get("chrome")
+        if hasattr(chrome_inst, "snapshot"):
+            try:
+                auto_snapshot = chrome_inst.snapshot()
+            except Exception:
+                pass
+
+    return DiagnosticReport(
+        failing_line=failing_line,
+        failing_code=failing_code,
+        candidate_matches=candidate_matches,
+        auto_snapshot=auto_snapshot,
+    )
+
+
 class OutputBudgetFormatter:
     """Serializes and caps Python REPL execution results to fit token budgets."""
 
@@ -70,6 +135,76 @@ class OutputBudgetFormatter:
         self.max_depth = max_depth
         self.string_head_tail = string_head_tail
 
+    def render(self, outcome: ExecutionOutcome) -> str:
+        """Render a strongly-typed ExecutionOutcome into a token-budgeted, defanged text payload."""
+        sections: List[str] = []
+
+        # 0. Ambient header banner (if provided)
+        if outcome.ambient_header and outcome.ambient_header.strip():
+            sections.append(outcome.ambient_header.strip())
+
+        # 1. Error / Exception
+        if outcome.error:
+            error_text = outcome.error
+            diag = outcome.diagnostic
+            if diag and diag.failing_line is not None and diag.failing_code and not outcome.error.startswith("Line "):
+                error_text = f"Line {diag.failing_line}: {diag.failing_code}\n{outcome.error}"
+            sections.append(f"[error]\n{self._truncate_string(error_text, 2000)}")
+
+        # 2. Stdout or Partial Stdout
+        if outcome.stdout and outcome.stdout.strip():
+            stdout_budget = max(2000, int(self.max_chars * 0.4))
+            truncated_stdout = self._truncate_string(outcome.stdout.strip(), stdout_budget)
+            tag = "[partial_stdout]" if outcome.error else "[stdout]"
+            sections.append(f"{tag}\n{truncated_stdout}")
+
+        # 3. Candidate Matches (Fuzzy matches on failure)
+        if outcome.diagnostic and outcome.diagnostic.candidate_matches:
+            match_lines = []
+            for m in outcome.diagnostic.candidate_matches:
+                if isinstance(m, dict):
+                    ref = m.get("ref", "")
+                    if ref and not str(ref).startswith("["):
+                        ref = f"[{ref}]" if str(ref).startswith("#") else f"[#{ref}]"
+                    role = m.get("role", "element")
+                    name = m.get("name", "")
+                    match_lines.append(f"- {ref} ({role} '{name}')")
+                else:
+                    match_lines.append(f"- {m}")
+            if match_lines:
+                sections.append(f"[candidate_matches]\n" + "\n".join(match_lines))
+
+        # 4. Diagnostic Auto-Snapshot (if present from error recovery)
+        if outcome.diagnostic and outcome.diagnostic.auto_snapshot and outcome.diagnostic.auto_snapshot.strip():
+            snapshot_budget = max(2000, int(self.max_chars * 0.4))
+            truncated_snapshot = self._truncate_string(outcome.diagnostic.auto_snapshot.strip(), snapshot_budget)
+            sections.append(f"[diagnostic_auto_snapshot]\n{truncated_snapshot}")
+
+        # 5. Stderr
+        if outcome.stderr and outcome.stderr.strip():
+            sections.append(f"[stderr]\n{self._truncate_string(outcome.stderr.strip(), 1500)}")
+
+        # 6. Result value (only if no error)
+        if outcome.has_result and not outcome.error:
+            used_chars = sum(len(s) for s in sections)
+            remaining_budget = max(200, self.max_chars - used_chars)
+            formatted_res = self._serialize_value(
+                outcome.result, current_depth=0, budget=remaining_budget
+            )
+            # Apply hard ceiling safety check to formatted_res if needed
+            if len(formatted_res) > remaining_budget:
+                formatted_res = self._truncate_string(formatted_res, remaining_budget)
+            sections.append(f"[result]\n{formatted_res}")
+
+        if not sections:
+            return "(executed successfully with no output)"
+
+        if len(sections) == 1 and outcome.ambient_header and sections[0] == outcome.ambient_header.strip():
+            return f"{outcome.ambient_header.strip()}\n\n(executed successfully with no output)"
+
+        raw_output = "\n\n".join(sections)
+        return defang_telemetry_payload(raw_output)
+
     def format_execution_result(
         self,
         stdout: str = "",
@@ -83,72 +218,24 @@ class OutputBudgetFormatter:
         failing_code: Optional[str] = None,
         ambient_header: Optional[str] = None,
     ) -> str:
-        sections: List[str] = []
-
-        # 0. Ambient header banner (if provided)
-        if ambient_header and ambient_header.strip():
-            sections.append(ambient_header.strip())
-
-        # 1. Error / Exception
-        if error:
-            if failing_line is not None and failing_code and not error.startswith("Line "):
-                error_text = f"Line {failing_line}: {failing_code}\n{error}"
-            else:
-                error_text = error
-            sections.append(f"[error]\n{self._truncate_string(error_text, 2000)}")
-
-        # 2. Stdout or Partial Stdout
-        if stdout and stdout.strip():
-            stdout_budget = max(2000, int(self.max_chars * 0.4))
-            truncated_stdout = self._truncate_string(stdout.strip(), stdout_budget)
-            tag = "[partial_stdout]" if error else "[stdout]"
-            sections.append(f"{tag}\n{truncated_stdout}")
-
-        # 3. Candidate Matches (Fuzzy matches on failure)
-        if candidate_matches and len(candidate_matches) > 0:
-            match_lines = []
-            for m in candidate_matches:
-                if isinstance(m, dict):
-                    ref = m.get("ref", "")
-                    if ref and not str(ref).startswith("["):
-                        ref = f"[{ref}]" if str(ref).startswith("#") else f"[#{ref}]"
-                    role = m.get("role", "element")
-                    name = m.get("name", "")
-                    match_lines.append(f"- {ref} ({role} '{name}')")
-                else:
-                    match_lines.append(f"- {m}")
-            sections.append(f"[candidate_matches]\n" + "\n".join(match_lines))
-
-        # 4. Diagnostic Auto-Snapshot (if present from error recovery)
-        if auto_snapshot and auto_snapshot.strip():
-            snapshot_budget = max(2000, int(self.max_chars * 0.4))
-            truncated_snapshot = self._truncate_string(auto_snapshot.strip(), snapshot_budget)
-            sections.append(f"[diagnostic_auto_snapshot]\n{truncated_snapshot}")
-
-        # 5. Stderr
-        if stderr and stderr.strip():
-            sections.append(f"[stderr]\n{self._truncate_string(stderr.strip(), 1500)}")
-
-        # 6. Result value (only if no error)
-        if has_result and not error:
-            used_chars = sum(len(s) for s in sections)
-            remaining_budget = max(200, self.max_chars - used_chars)
-            formatted_res = self._serialize_value(
-                result, current_depth=0, budget=remaining_budget
+        diag = None
+        if failing_line is not None or failing_code or candidate_matches or auto_snapshot:
+            diag = DiagnosticReport(
+                failing_line=failing_line,
+                failing_code=failing_code,
+                candidate_matches=candidate_matches,
+                auto_snapshot=auto_snapshot,
             )
-            # Apply hard ceiling safety check to formatted_res if needed
-            if len(formatted_res) > remaining_budget:
-                formatted_res = self._truncate_string(formatted_res, remaining_budget)
-            sections.append(f"[result]\n{formatted_res}")
-
-        if not sections:
-            return "(executed successfully with no output)"
-
-        if len(sections) == 1 and ambient_header and sections[0] == ambient_header.strip():
-            return f"{ambient_header.strip()}\n\n(executed successfully with no output)"
-
-        raw_output = "\n\n".join(sections)
-        return defang_telemetry_payload(raw_output)
+        outcome = ExecutionOutcome(
+            stdout=stdout,
+            stderr=stderr,
+            result=result,
+            has_result=has_result,
+            error=error,
+            diagnostic=diag,
+            ambient_header=ambient_header,
+        )
+        return self.render(outcome)
 
     def _truncate_string(self, text: str, budget: int) -> str:
         if len(text) <= budget:
@@ -276,14 +363,17 @@ class PythonReplSession:
         candidate_matches = None
         ambient_header = None
 
+        diagnostic_report: Optional[DiagnosticReport] = None
+
         try:
             tree = ast.parse(code_str, filename="<repl>", mode="exec")
         except SyntaxError as e:
             tb_lines = traceback.format_exception_only(type(e), e)
-            return self.formatter.format_execution_result(
+            outcome = ExecutionOutcome(
                 error="SyntaxError: " + str(e),
                 stderr="".join(tb_lines),
             )
+            return self.formatter.render(outcome)
 
         if not tree.body:
             return "(executed successfully with no output)"
@@ -320,29 +410,11 @@ class PythonReplSession:
         except BaseException as e:
             error_msg = self._format_exception_message(e)
             stderr_buf.write(self._sanitize_traceback(e))
-
-            # Extract failing line number and snippet from <repl>
-            if e.__traceback__:
-                for frame in traceback.extract_tb(e.__traceback__):
-                    if frame.filename == "<repl>" and frame.lineno is not None:
-                        failing_line = frame.lineno
-                        lines = code_str.splitlines()
-                        if 1 <= failing_line <= len(lines):
-                            failing_code = lines[failing_line - 1].strip()
-                        break
-
-            # Check for candidate suggestions
-            if hasattr(e, "suggestions") and getattr(e, "suggestions"):
-                candidate_matches = getattr(e, "suggestions")
-
-            # Check for auto-snapshot attribute on exception or session
-            if hasattr(e, "auto_snapshot") and getattr(e, "auto_snapshot"):
-                auto_snapshot = getattr(e, "auto_snapshot")
-            elif isinstance(e, ChromeBridgeError) and "chrome" in self._globals and hasattr(self._globals["chrome"], "snapshot"):
-                try:
-                    auto_snapshot = self._globals["chrome"].snapshot()
-                except Exception:
-                    pass
+            diagnostic_report = extract_diagnostic_report(
+                exc=e,
+                code_str=code_str,
+                session_globals=self._globals,
+            )
 
         # Retrieve ambient state header if enabled
         if self.include_ambient:
@@ -353,18 +425,16 @@ class PythonReplSession:
                 except Exception:
                     pass
 
-        return self.formatter.format_execution_result(
+        outcome = ExecutionOutcome(
             stdout=stdout_buf.getvalue(),
             stderr=stderr_buf.getvalue(),
             result=result_value,
-            error=error_msg,
             has_result=has_result,
-            auto_snapshot=auto_snapshot,
-            candidate_matches=candidate_matches,
-            failing_line=failing_line,
-            failing_code=failing_code,
+            error=error_msg,
+            diagnostic=diagnostic_report,
             ambient_header=ambient_header,
         )
+        return self.formatter.render(outcome)
 
     def _format_exception_message(self, exc: BaseException) -> str:
         return f"{type(exc).__name__}: {str(exc)}"
