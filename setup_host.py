@@ -7,7 +7,6 @@ launcher wrapper scripts, agent skill deployment, and MCP client configurations
 """
 
 import argparse
-import hashlib
 import json
 import os
 import platform
@@ -23,33 +22,10 @@ import threading
 import time
 
 HOST_NAME = "com.chrome_bridge.native"
-DEFAULT_EXTENSION_ID = "nbghhppoiigjbdjbhefiaijofpnhgepb"
+EXTENSION_ID = "nbghhppoiigjbdjbhefiaijofpnhgepb"
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
-
-
-def extension_id_from_path(extension_dir: Path) -> str:
-    """Match Chromium's unpacked-extension ID generation."""
-    path_str = str(extension_dir.resolve())
-
-    if IS_WINDOWS and len(path_str) >= 2 and path_str[1] == ":":
-        path_str = path_str[0].upper() + path_str[1:]
-
-    encoded = (
-        path_str.encode("utf-16-le")
-        if IS_WINDOWS
-        else path_str.encode("utf-8")
-    )
-
-    digest = hashlib.sha256(encoded).digest()[:16]
-
-    return "".join(
-        chr(ord("a") + (byte >> 4)) +
-        chr(ord("a") + (byte & 0x0F))
-        for byte in digest
-    )
-
 
 
 class SpinnerContext:
@@ -636,26 +612,15 @@ def detect_mcp_clients(home_dir: Path) -> List[MCPClientInfo]:
     return results
 
 
-def register_browser_manifests(
-    launcher_path: Path,
-    install_dir: Path,
-    home_dir: Path,
-    extension_dir: Optional[Path] = None,
-    quiet: bool = False,
-) -> None:
+def register_browser_manifests(launcher_path: Path, install_dir: Path, home_dir: Path, quiet: bool = False) -> None:
     """Write browser native messaging manifest JSON and register Windows registry keys if on Windows."""
-    extension_id = (
-        extension_id_from_path(extension_dir)
-        if extension_dir is not None
-        else DEFAULT_EXTENSION_ID
-    )
     manifest_data = {
         "name": HOST_NAME,
         "description": "Chrome Bridge Native Messaging Host for AI Procedural Automation",
         "path": str(launcher_path),
         "type": "stdio",
         "allowed_origins": [
-            f"chrome-extension://{extension_id}/"
+            f"chrome-extension://{EXTENSION_ID}/"
         ],
     }
     manifest_json = json.dumps(manifest_data, indent=2) + "\n"
@@ -865,8 +830,6 @@ def run_setup(args: argparse.Namespace) -> int:
     home_dir = resolve_home_dir()
     install_dir = resolve_install_dir(args.target, bool(getattr(args, "dev", False)))
     quiet = args.quiet
-    extension_dir = resolve_extension_dir(install_dir, source_dir)
-    extension_id = extension_id_from_path(extension_dir) if extension_dir is not None else DEFAULT_EXTENSION_ID
 
     if not quiet:
         banner("Chrome Bridge 2.0 — Pure Python Live Setup Assistant")
@@ -874,7 +837,7 @@ def run_setup(args: argparse.Namespace) -> int:
             ("Operating System", f"{platform.system()} ({platform.machine()})"),
             ("Python Runtime", f"{sys.version.split()[0]} ({sys.executable})"),
             ("Target Directory", str(install_dir)),
-            ("Extension ID", extension_id),
+            ("Extension ID", EXTENSION_ID),
         ]))
         print()
 
@@ -891,14 +854,7 @@ def run_setup(args: argparse.Namespace) -> int:
     # Step 3: Register Native Messaging Manifests
     with ui.spinner("Registering Chrome Native Messaging Host manifests...") as sp:
         launcher_path = generate_host_launcher(install_dir, python_exec, quiet=True)
-        extension_dir = resolve_extension_dir(install_dir, source_dir)
-        register_browser_manifests(
-            launcher_path,
-            install_dir,
-            home_dir,
-            extension_dir=extension_dir,
-            quiet=True,
-        )
+        register_browser_manifests(launcher_path, install_dir, home_dir, quiet=True)
         browsers = detect_installed_browsers(home_dir)
         configured_browsers = [b.name for b in browsers if b.manifest_path.exists()]
         sp.ok(f"Configured {len(configured_browsers)} browser manifest(s)")
