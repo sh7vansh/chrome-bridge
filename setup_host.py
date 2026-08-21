@@ -299,7 +299,7 @@ def sync_runtime_files(source_dir: Path, install_dir: Path, quiet: bool = False)
                 print(f"  {green('✓')} Synced {bold(fname)} {dim(f'({size} bytes)')}")
 
     # Copy directories if present
-    for dname in (".agents", "extension", "skills"):
+    for dname in (".agents", "chrome_bridge", "extension", "skills"):
         src_dir = source_dir / dname
         dst_dir = install_dir / dname
         if src_dir.exists():

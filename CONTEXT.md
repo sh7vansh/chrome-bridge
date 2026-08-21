@@ -66,13 +66,18 @@ _Avoid_: Socket error, host down, extension dead
 A client-side overlay utility that renders transient bounding badges over indexed interactive DOM nodes on the active web page to visually verify locator mapping.
 _Avoid_: Element marker, bounding box injector, visual debugger
 
-**In-Page Batch Synthesizer**:
-The pure Python compilation module responsible for translating high-level batch action intents (`fill_form`, `extract_items`, `search`) into optimized, single-roundtrip JavaScript execution payloads.
+**Security Gateway**:
+The centralized zero-latency defense module that enforces the 5-layer security pipeline (destructive term blocking, task-scoped origin locking, sliding-window anti-DoS runaway interception, untrusted XML boundary framing, and telemetry defanging) across all action dispatchers and data extractors.
+_Avoid_: Security filter, auth checker, safety guard
+
+**DOM Compiler (`DomCompiler`)**:
+The pure Python compilation and execution dispatch module responsible for translating high-level batch action intents (`fill_form`, `extract_items`, `search`) and fluent element locators into optimized single-roundtrip JavaScript execution payloads, and decoding structured responses and Diagnostic Reports into domain exceptions.
 _Avoid_: Script builder, JS generator, query template engine
 
 **Diagnostic Report**:
 The structured domain payload encapsulating failing script lines, partial standard output, fuzzy candidate locators, and token-budgeted Semantic DOM Auto-Snapshots produced upon execution failure.
 _Avoid_: Error payload, failure bundle, debug response
+
 
 
 ## Abstraction Seam Guarantees

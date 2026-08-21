@@ -1,0 +1,466 @@
+"""Deep DOM Compiler module for batch JavaScript synthesis, fluent discovery, and structured error decoding."""
+
+import json
+import time
+from typing import Any, Callable, Dict, List, Optional, Union
+
+from .exceptions import (
+    ActionInterceptionError,
+    ChromeBridgeError,
+    ElementNotFoundError,
+    NavigationTimeoutError,
+    TargetLocator,
+    _extract_hostname,
+    normalize_locator,
+)
+
+_DISCOVERY_HELPER_JS = """
+function __cb_is_visible(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return false;
+    if (typeof el.checkVisibility === 'function') {
+        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+            if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
+            return false;
+        }
+    }
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) < 0.05) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+        if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
+        return false;
+    }
+    return true;
+}
+
+function __cb_tag(el) {
+    if (!el) return null;
+    if (!window.__cb_handle_counter) window.__cb_handle_counter = 0;
+    let bridgeId = el.getAttribute('data-cbridge-id');
+    if (!bridgeId) {
+        bridgeId = 'cb_' + (++window.__cb_handle_counter) + '_' + Date.now().toString(36);
+        el.setAttribute('data-cbridge-id', bridgeId);
+    }
+    const text = (el.innerText || el.textContent || el.value || '').trim();
+    const role = el.getAttribute('role') || el.tagName.toLowerCase();
+    return {
+        selector: '[data-cbridge-id="' + bridgeId + '"]',
+        tagName: el.tagName.toLowerCase(),
+        role: role,
+        text: text.slice(0, 100),
+        id: el.id || '',
+        name: el.getAttribute('name') || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        value: el.value || ''
+    };
+}
+"""
+
+
+class DomCompiler:
+    """Pure compiler and execution dispatch module for in-page compound batch operations and DOM discovery.
+
+    Translates high-level batch intents (element finding heuristics, structured data extraction,
+    form filling, and search engine shortcuts) into optimized single-pass JavaScript payloads,
+    and decodes structured responses and Diagnostic Reports into domain exceptions.
+    """
+
+    SEARCH_ENGINES: Dict[str, str] = {
+        "google": "https://www.google.com/search?q={query}",
+        "g": "https://www.google.com/search?q={query}",
+        "bing": "https://www.bing.com/search?q={query}",
+        "b": "https://www.bing.com/search?q={query}",
+        "duckduckgo": "https://duckduckgo.com/?q={query}",
+        "ddg": "https://duckduckgo.com/?q={query}",
+        "youtube": "https://www.youtube.com/results?search_query={query}",
+        "yt": "https://www.youtube.com/results?search_query={query}",
+        "github": "https://github.com/search?q={query}",
+        "gh": "https://github.com/search?q={query}",
+    }
+
+    @classmethod
+    def compile_search_url(cls, query: str, engine: str = "google") -> str:
+        """Resolve target search engine URL for a given query string."""
+        import urllib.parse
+        q_enc = urllib.parse.quote_plus(query)
+        eng_lower = engine.lower().strip()
+        if eng_lower in cls.SEARCH_ENGINES:
+            return cls.SEARCH_ENGINES[eng_lower].format(query=q_enc)
+        elif "{query}" in engine:
+            return engine.replace("{query}", q_enc)
+        elif engine.startswith("http://") or engine.startswith("https://"):
+            return f"{engine}?q={q_enc}" if "?" not in engine else f"{engine}&q={q_enc}"
+        else:
+            return f"https://www.google.com/search?q={q_enc}"
+
+    @classmethod
+    def compile_extract_items_js(cls, container_selector: str, fields: Dict[str, str]) -> str:
+        """Generate JavaScript payload for structured multi-field extraction across container elements."""
+        return f"""
+        (() => {{
+            const containerSelector = {json.dumps(container_selector)};
+            const fields = {json.dumps(fields)};
+            const containers = Array.from(document.querySelectorAll(containerSelector));
+            const results = [];
+
+            for (const container of containers) {{
+                const row = {{}};
+                for (const [key, fieldSel] of Object.entries(fields)) {{
+                    let targetEl = container;
+                    let attrName = null;
+                    let sel = (fieldSel || '').trim();
+
+                    if (sel.includes('@')) {{
+                        const parts = sel.split('@');
+                        const subSel = parts[0].trim();
+                        attrName = parts[1].trim();
+                        if (subSel && subSel !== '.' && subSel !== 'self' && subSel.toLowerCase() !== 'text') {{
+                            targetEl = container.querySelector(subSel);
+                        }}
+                    }} else if (sel && sel !== '.' && sel !== 'self' && sel.toLowerCase() !== 'text') {{
+                        targetEl = container.querySelector(sel);
+                    }}
+
+                    if (!targetEl) {{
+                        row[key] = "";
+                    }} else if (attrName) {{
+                        if (attrName.toLowerCase() === 'text') {{
+                            row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                        }} else {{
+                            const val = targetEl.getAttribute(attrName);
+                            row[key] = (val !== null && val !== undefined ? val : "").toString().trim();
+                        }}
+                    }} else {{
+                        row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                    }}
+                }}
+                results.push(row);
+            }}
+            return results;
+        }})()
+        """
+
+    @classmethod
+    def compile_query_all_js(cls, css_selector: str) -> str:
+        """Generate JavaScript payload for finding and tagging all visible elements matching a CSS selector."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const selector = {json.dumps(css_selector)};
+            const all = document.querySelectorAll(selector);
+            const results = [];
+            for (const el of all) {{
+                if (__cb_is_visible(el)) {{
+                    const tagged = __cb_tag(el);
+                    if (tagged) results.push(tagged);
+                }}
+            }}
+            return results;
+        }})()
+        """
+
+    @classmethod
+    def compile_find_css_js(cls, target_str: str) -> str:
+        """Generate JavaScript payload for locating a visible element by CSS selector."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            try {{
+                const el = document.querySelector({json.dumps(target_str)});
+                if (el && __cb_is_visible(el)) return __cb_tag(el);
+            }} catch (e) {{}}
+            return null;
+        }})()
+        """
+
+    @classmethod
+    def compile_text_finder_js(cls, text: str, exact: bool = False) -> str:
+        """Generate JavaScript payload for finding a visible element by inner or accessible text."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(text)};
+            const exact = {json.dumps(exact)};
+            const qLower = query.toLowerCase();
+
+            const candidates = [];
+            const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
+            for (const el of all) {{
+                if (!__cb_is_visible(el)) continue;
+                const txt = (el.innerText || el.textContent || '').trim();
+                if (!txt) continue;
+                const tLower = txt.toLowerCase();
+                
+                let match = false;
+                let score = 0;
+                if (exact) {{
+                    if (tLower === qLower) {{ match = true; score = 100; }}
+                }} else {{
+                    if (tLower === qLower) {{ match = true; score = 100; }}
+                    else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
+                }}
+
+                if (match) {{
+                    const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
+                    if (isInteractive) score += 30;
+                    score -= Math.min(20, el.children.length * 5);
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+    @classmethod
+    def compile_input_finder_js(cls, placeholder_or_label: str) -> str:
+        """Generate JavaScript payload for finding an input, textarea, or select by placeholder, label, or name."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(placeholder_or_label)};
+            const qLower = query.toLowerCase();
+
+            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+            const candidates = [];
+
+            for (const el of inputs) {{
+                if (!__cb_is_visible(el)) continue;
+                let score = 0;
+
+                const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
+                if (placeholder === qLower) score = 100;
+                else if (placeholder.includes(qLower)) score = 80;
+
+                const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
+                if (ariaLabel === qLower) score = Math.max(score, 95);
+                else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
+
+                const name = (el.getAttribute('name') || '').trim().toLowerCase();
+                const id = (el.id || '').trim().toLowerCase();
+                if (name === qLower || id === qLower) score = Math.max(score, 90);
+                else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
+
+                if (el.id) {{
+                    try {{
+                        const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                        if (labelEl) {{
+                            const lText = labelEl.innerText.trim().toLowerCase();
+                            if (lText === qLower) score = Math.max(score, 95);
+                            else if (lText.includes(qLower)) score = Math.max(score, 75);
+                        }}
+                    }} catch (e) {{}}
+                }}
+                const parentLabel = el.closest('label');
+                if (parentLabel) {{
+                    const lText = parentLabel.innerText.trim().toLowerCase();
+                    if (lText === qLower) score = Math.max(score, 90);
+                    else if (lText.includes(qLower)) score = Math.max(score, 70);
+                }}
+
+                if (score > 0) {{
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+    @classmethod
+    def compile_button_finder_js(cls, name: str, exact: bool = False) -> str:
+        """Generate JavaScript payload for finding a button or clickable role by visible name."""
+        return f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const query = {json.dumps(name)};
+            const exact = {json.dumps(exact)};
+            const qLower = query.toLowerCase();
+
+            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
+            const candidates = [];
+
+            for (const el of buttons) {{
+                if (!__cb_is_visible(el)) continue;
+                const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+                if (!txt) continue;
+                const tLower = txt.toLowerCase();
+
+                let score = 0;
+                if (exact) {{
+                    if (tLower === qLower) score = 100;
+                }} else {{
+                    if (tLower === qLower) score = 100;
+                    else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
+                }}
+
+                if (score > 0) {{
+                    if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
+                    candidates.push({{ el, score }});
+                }}
+            }}
+
+            if (candidates.length === 0) return null;
+            candidates.sort((a, b) => b.score - a.score);
+            return __cb_tag(candidates[0].el);
+        }})()
+        """
+
+    @classmethod
+    def decode_error(
+        cls,
+        err_data: Any,
+        params: Optional[Dict[str, Any]] = None,
+        auto_snapshot: Optional[str] = None,
+    ) -> None:
+        """Decode backend error JSON payload into domain exceptions with auto-snapshot recovery."""
+        if isinstance(err_data, dict) and not auto_snapshot:
+            auto_snapshot = err_data.get("auto_snapshot")
+
+        target_loc = params.get("target") if params else None
+        target_str = ""
+        if isinstance(target_loc, dict):
+            if target_loc.get("type") == "ref":
+                target_str = f"[#{target_loc.get('refId')}]"
+            else:
+                target_str = str(target_loc.get("selector", ""))
+        elif target_loc is not None:
+            target_str = str(target_loc)
+
+        tab_id = params.get("tabId") if params else None
+
+        exc = None
+        if isinstance(err_data, dict):
+            code = err_data.get("code") or err_data.get("name")
+            if code == "ELEMENT_NOT_FOUND" or "not found" in str(err_data.get("message", "")).lower():
+                exc = ElementNotFoundError(
+                    target=err_data.get("target", target_str),
+                    tab_id=err_data.get("tabId", tab_id),
+                    stale=err_data.get("stale", False),
+                    suggestions=err_data.get("suggestions", []),
+                    url=err_data.get("url", ""),
+                )
+            elif code == "ACTION_INTERCEPTED":
+                exc = ActionInterceptionError(
+                    target=err_data.get("target", target_str),
+                    interceptor_tag=err_data.get("interceptorTag", "overlay"),
+                    interceptor_ref=err_data.get("interceptorRef"),
+                    interceptor_desc=err_data.get("interceptorDesc", ""),
+                    tab_id=err_data.get("tabId", tab_id),
+                )
+            elif code == "TIMEOUT":
+                exc = NavigationTimeoutError(
+                    target=err_data.get("target", target_str),
+                    timeout=err_data.get("timeout", 10.0),
+                    url=err_data.get("url", ""),
+                    ready_state=err_data.get("readyState", "unknown"),
+                    dom_state=err_data.get("domState", "unknown"),
+                    tab_id=err_data.get("tabId", tab_id),
+                )
+            else:
+                exc = ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
+        else:
+            err_str = str(err_data)
+            if "not found" in err_str.lower():
+                exc = ElementNotFoundError(target=target_str, tab_id=tab_id)
+            elif "intercepted" in err_str.lower():
+                exc = ActionInterceptionError(target=target_str, tab_id=tab_id)
+            elif "timed out" in err_str.lower():
+                exc = NavigationTimeoutError(target=target_str, tab_id=tab_id)
+            else:
+                exc = ChromeBridgeError(err_str, tab_id=tab_id)
+
+        if auto_snapshot and exc:
+            exc.auto_snapshot = auto_snapshot
+        if exc:
+            raise exc
+
+    @classmethod
+    def collect_fuzzy_suggestions(cls, tab: Any, query: str) -> List[Dict[str, Any]]:
+        """Collect fuzzy interactive candidate matches from active DOM on element lookup failure."""
+        try:
+            js = f"""
+            (() => {{
+                const query = {json.dumps(query)}.toLowerCase();
+                const all = document.querySelectorAll('button, a, input, select, textarea, [role]');
+                const suggestions = [];
+                for (const el of all) {{
+                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
+                    if (tLower.includes(query) || query.includes(tLower) || tLower.slice(0, 3) === query.slice(0, 3)) {{
+                        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                        let ref = el.getAttribute('data-cbridge-id') || el.id || '';
+                        suggestions.push({{
+                            'ref': ref ? '#' + ref : '#element',
+                            'role': role,
+                            'name': txt.slice(0, 50)
+                        }});
+                        if (suggestions.length >= 5) break;
+                    }}
+                }}
+                return suggestions;
+            }})()
+            """
+            res = tab.eval_js(js)
+            if isinstance(res, list):
+                return res
+            elif isinstance(res, dict) and isinstance(res.get("result"), list):
+                return res["result"]
+        except Exception:
+            pass
+        return []
+
+    @classmethod
+    def poll_find_element(
+        cls,
+        tab: Any,
+        finder_func: Callable[[], Any],
+        query: str,
+        handle_factory: Callable[..., Any],
+        timeout: float = 1.5,
+        interval: float = 0.1,
+    ) -> Any:
+        """Poll element discovery evaluation until element is resolved or timeout reached."""
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            try:
+                info = finder_func()
+                if isinstance(info, dict) and "result" in info and isinstance(info["result"], dict):
+                    info = info["result"]
+                if isinstance(info, dict) and (info.get("selector") or info.get("target")):
+                    return handle_factory(
+                        tab=tab,
+                        target=info.get("selector") or info.get("target"),
+                        tag_name=info.get("tagName", ""),
+                        role=info.get("role", ""),
+                        text=info.get("text", ""),
+                    )
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                break
+            time.sleep(interval)
+
+        suggestions = cls.collect_fuzzy_suggestions(tab, query)
+        snap = None
+        try:
+            snap = tab.snapshot(format="compact", max_tokens=1500)
+        except Exception:
+            pass
+        raise ElementNotFoundError(
+            target=query,
+            tab_id=tab.id,
+            url=getattr(tab, "url", ""),
+            suggestions=suggestions,
+            auto_snapshot=snap,
+        )
+
+
+# Backward-compatible alias
+DomBatchSynthesizer = DomCompiler

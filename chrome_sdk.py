@@ -33,17 +33,10 @@ Standard Composition Lifecycle:
    >>> chrome.media.toggle()
 """
 
-import contextlib
-import json
 import os
-import re
-import socket
 import sys
 import time
-from collections import deque
-from typing import Any, Dict, List, Optional, Union
-
-import tempfile
+from typing import Any, Dict, List, Optional, Set, Union
 
 # Ensure UTF-8 streams cross-platform (especially on Windows)
 if sys.platform == "win32":
@@ -56,19 +49,6 @@ if sys.platform == "win32":
             sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-
-DEFAULT_SOCKET_PATH = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.sock")
-DEFAULT_PORT_FILE = os.path.join(tempfile.gettempdir(), "antigravity_chrome_bridge.port")
-SOCKET_PATH = DEFAULT_SOCKET_PATH
-TargetLocator = Union[int, str]
-"""Target locator for DOM elements.
-
-Accepts:
-- int: Integer Ref-ID from snapshot (e.g. 14)
-- str: Bracketed Ref-ID token (e.g. "[#14]")
-- str: Hash Ref-ID token (e.g. "#14")
-- str: Standard CSS selector (e.g. "button.submit", "input[name='q']", "#main-btn")
-"""
 
 
 def resolve_runtime_directory() -> str:
@@ -88,7 +68,6 @@ def resolve_runtime_directory() -> str:
         if os.path.exists(os.path.join(c, "chrome_sdk.py")):
             return os.path.abspath(c)
     return os.path.abspath(os.path.expanduser("~/.chrome-bridge"))
-
 
 
 def auto_bootstrap_environment(target_dir: Optional[str] = None) -> List[str]:
@@ -124,599 +103,45 @@ def auto_bootstrap_environment(target_dir: Optional[str] = None) -> List[str]:
 # Automatically bootstrap runtime environment and site-packages on import
 auto_bootstrap_environment()
 
-
-
-class ChromeBridgeError(Exception):
-    """Base exception for all Chrome Bridge operations."""
-
-    def __init__(self, message: str, tab_id: Optional[int] = None):
-        super().__init__(message)
-        self.tab_id = tab_id
-        self.auto_snapshot: Optional[str] = None
-
-
-class SecurityException(ChromeBridgeError):
-    """Raised when an operation violates Chrome Bridge zero-latency security policies."""
-
-    def __init__(
-        self,
-        message: str,
-        status: str = "BLOCKED_SECURITY_VIOLATION",
-        tab_id: Optional[int] = None,
-    ):
-        super().__init__(message, tab_id=tab_id)
-        self.status = status
-
-
-class RunawayLoopDetectedError(SecurityException):
-    """Raised when a repetitive action, oscillation, or scroll runaway loop is detected."""
-
-    def __init__(
-        self,
-        message: str,
-        status: str = "RUNAWAY_LOOP_DETECTED",
-        tab_id: Optional[int] = None,
-    ):
-        super().__init__(message, status=status, tab_id=tab_id)
-
-
-CRITICAL_DELETION_TERMS = [
-    r"\bdelete[-_\s]+account\b",
-    r"\bcancel[-_\s]+account\b",
-    r"\bclose[-_\s]+account\b",
-    r"\bdelete[-_\s]+organization\b",
-    r"\bdelete[-_\s]+org\b",
-    r"\bterminate[-_\s]+subscription\b",
-    r"\bcancel[-_\s]+subscription\b",
-    r"\bpurge[-_\s]+database\b",
-    r"\bdrop[-_\s]+database\b",
-    r"\bdelete[-_\s]+repository\b",
-    r"\bdelete[-_\s]+repo\b",
-    r"\bwipe[-_\s]+data\b",
-]
-CRITICAL_DELETION_REGEX = re.compile("|".join(CRITICAL_DELETION_TERMS), re.IGNORECASE)
-
-SSO_ALLOWLIST = {
-    "accounts.google.com",
-    "github.com",
-    "login.microsoftonline.com",
-    "appleid.apple.com",
-    "auth0.com",
-    "login.live.com",
-    "auth.github.com",
-    "gitlab.com",
-}
-
-
-def _extract_hostname(url: str) -> str:
-    """Extract clean lowercase hostname from URL or domain string."""
-    if not url:
-        return ""
-    if url == "about:blank" or url.startswith("chrome://"):
-        return ""
-    import urllib.parse
-    parsed = urllib.parse.urlparse(url)
-    if parsed.netloc:
-        return parsed.netloc.split(":")[0].lower()
-    if not parsed.scheme and "/" not in url:
-        return url.split(":")[0].lower()
-    return ""
-
-
-def wrap_untrusted_data(content: str, origin: str = "", selector: str = "body") -> str:
-    """Wrap raw page content in strict XML structural boundaries and defang tag-breakout attempts."""
-    s_content = content if isinstance(content, str) else str(content)
-    if "</UNTRUSTED_EXTERNAL_DATA>" in s_content:
-        s_content = s_content.replace("</UNTRUSTED_EXTERNAL_DATA>", "&lt;/UNTRUSTED_EXTERNAL_DATA&gt;")
-    safe_origin = origin if isinstance(origin, str) else str(origin)
-    if '"' in safe_origin:
-        safe_origin = safe_origin.replace('"', '&quot;')
-    safe_selector = selector if isinstance(selector, str) else str(selector)
-    if '"' in safe_selector:
-        safe_selector = safe_selector.replace('"', '&quot;')
-    return f'<UNTRUSTED_EXTERNAL_DATA origin="{safe_origin}" selector="{safe_selector}">\n{s_content}\n</UNTRUSTED_EXTERNAL_DATA>'
-
-
-def defang_telemetry_payload(data: Any) -> Any:
-    """Recursively defang remote markdown image beacons and HTML active tags."""
-    if isinstance(data, str):
-        # Defang markdown image beacon: ![alt](url) -> [IMAGE_BLOCKED: alt | url]
-        s = re.sub(r"!\[(.*?)\]\((https?://[^\)]+)\)", r"[IMAGE_BLOCKED: \1 | \2]", data)
-        # Defang HTML media / active elements
-        s = re.sub(r"<(img|iframe|link)\b([^>]*)>", r"[TAG_BLOCKED: \1\2]", s, flags=re.IGNORECASE)
-        s = re.sub(r"</(img|iframe|link)>", r"", s, flags=re.IGNORECASE)
-        return s
-    elif isinstance(data, dict):
-        return {k: defang_telemetry_payload(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [defang_telemetry_payload(item) for item in data]
-    elif isinstance(data, tuple):
-        return tuple(defang_telemetry_payload(item) for item in data)
-    return data
-
-
-class ChromeBridgeWorkerTelemetry:
-    """Structured telemetry schema for subagent worker return payloads."""
-
-    def __init__(
-        self,
-        tab_id: Optional[int] = None,
-        origin: str = "",
-        url: str = "",
-        title: str = "",
-        status: str = "success",
-        extracted_data: Any = None,
-        count: int = 0,
-        execution_ms: float = 0.0,
-        media_state: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
-    ):
-        self.tab_id = tab_id
-        self.origin = origin
-        self.url = url
-        self.title = title
-        self.status = status
-        self.extracted_data = extracted_data
-        self.count = count
-        self.execution_ms = execution_ms
-        self.media_state = media_state
-        self.error = error
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "tab_id": self.tab_id,
-            "origin": self.origin,
-            "url": self.url,
-            "title": self.title,
-            "status": self.status,
-            "extracted_data": defang_telemetry_payload(self.extracted_data),
-            "count": self.count,
-            "execution_ms": self.execution_ms,
-            "media_state": self.media_state,
-            "error": self.error,
-        }
-
-
-class SafetyController:
-    """Zero-overhead safety and origin governance controller.
-
-    Enforces origin locking to prevent redirection-based data exfiltration and
-    hardcoded deletion safety valves to prevent catastrophic accidental actions.
-
-    Example:
-        >>> # Explicitly allow navigation to an external API origin
-        >>> chrome.safety.allow_origin("https://api.github.com")
-        >>> 
-        >>> # Temporarily permit destructive actions if explicitly instructed by the user
-        >>> with chrome.safety.permit_destructive():
-        ...     chrome.click("[#delete-button]")
-    """
-
-    def __init__(self):
-        self._permit_destructive_depth = 0
-        self._allowed_origins: set = set()
-
-    @contextlib.contextmanager
-    def permit_destructive(self):
-        """Context manager to temporarily bypass destructive action safety valves.
-
-        Must be used when the user explicitly requests account deletion,
-        repository deletion, or data purge actions.
-
-        Example:
-            >>> with chrome.safety.permit_destructive():
-            ...     chrome.click("[#confirm-delete]")
-        """
-        self._permit_destructive_depth += 1
-        try:
-            yield
-        finally:
-            self._permit_destructive_depth = max(0, self._permit_destructive_depth - 1)
-
-    @property
-    def is_destructive_permitted(self) -> bool:
-        """Return True if destructive operations are currently permitted within a context manager."""
-        return self._permit_destructive_depth > 0
-
-    def allow_origin(self, url_or_domain: str) -> None:
-        """Allow navigations to the specified hostname or domain.
-
-        Args:
-            url_or_domain: Domain string or full URL (e.g. 'api.github.com' or 'https://example.com').
-
-        Example:
-            >>> chrome.safety.allow_origin("subdomain.example.com")
-        """
-        host = _extract_hostname(url_or_domain)
-        if host:
-            self._allowed_origins.add(host.lower())
-
-    def is_origin_allowed(self, host: str, tab_origins: Optional[set] = None) -> bool:
-        """Check whether a given hostname is permitted under current task scope and SSO allowlists."""
-        if not host or host in ("about:blank", "localhost", "127.0.0.1"):
-            return True
-        h = host.lower()
-        if h in SSO_ALLOWLIST:
-            return True
-        for sso in SSO_ALLOWLIST:
-            if h.endswith("." + sso):
-                return True
-        if h in self._allowed_origins:
-            return True
-        for allowed in self._allowed_origins:
-            if h == allowed or h.endswith("." + allowed):
-                return True
-        if tab_origins:
-            for orig in tab_origins:
-                if h == orig or h.endswith("." + orig):
-                    return True
-        return False
-
-
-class ActionTracker:
-    """Sliding-window ring buffer to intercept repetitive clicks, oscillations, and runaway scrolling."""
-
-    def __init__(self, maxlen: int = 20):
-        self.history = deque(maxlen=maxlen)
-        self.consecutive_scrolls = 0
-
-    def record_and_validate(self, action: str, target: Any, url: str, tab_id: Optional[int] = None) -> None:
-        now = time.time()
-        target_key = str(target) if target is not None else ""
-
-        if action == "scroll":
-            self.consecutive_scrolls += 1
-            if self.consecutive_scrolls > 10:
-                raise RunawayLoopDetectedError(
-                    f"Runaway scroll detected: {self.consecutive_scrolls} consecutive scrolls without interaction.",
-                    tab_id=tab_id,
-                )
-        else:
-            self.consecutive_scrolls = 0
-
-        # Repetitive click cap: >= 5 identical target clicks within 15s
-        if action in ("click", "click_ref"):
-            recent_clicks = [
-                (t, act, tgt)
-                for (t, act, tgt, u) in self.history
-                if act in ("click", "click_ref") and tgt == target_key and (now - t) <= 15.0
-            ]
-            if len(recent_clicks) >= 4:
-                raise RunawayLoopDetectedError(
-                    f"Repetitive click loop detected on target '{target_key}' (5 identical clicks within 15s).",
-                    tab_id=tab_id,
-                )
-
-        # Ping-pong oscillation: A -> B -> A -> B -> A -> (attempting B) -> 6 steps
-        if action in ("click", "click_ref"):
-            actions = list(self.history)[-5:]
-            if len(actions) == 5:
-                _, a0, tg0, _ = actions[0]
-                _, a1, tg1, _ = actions[1]
-                _, a2, tg2, _ = actions[2]
-                _, a3, tg3, _ = actions[3]
-                _, a4, tg4, _ = actions[4]
-                if (
-                    tg0 == tg2 == tg4 != tg1
-                    and tg1 == tg3 == target_key
-                    and a0 == a1 == a2 == a3 == a4 == action
-                ):
-                    raise RunawayLoopDetectedError(
-                        f"Ping-pong oscillation detected between '{tg0}' and '{target_key}'.",
-                        tab_id=tab_id,
-                    )
-
-        self.history.append((now, action, target_key, url))
-
-
-global_safety = SafetyController()
-
-
-DEFAULT_BROWSER_UNAVAILABLE_MSG = (
-    "Browser instance is not reachable or session disconnected.\n\n"
-    "Troubleshooting checklist:\n"
-    "  1. Ensure Google Chrome is open and running.\n"
-    "  2. Verify Chrome Bridge is active in Chrome.\n"
-    "  3. Re-run setup on this machine: uvx antigravity-chrome-bridge setup or ./setup.sh"
+# Import modular subsystems from chrome_bridge
+from chrome_bridge.exceptions import (
+    CRITICAL_DELETION_REGEX,
+    CRITICAL_DELETION_TERMS,
+    DEFAULT_BROWSER_UNAVAILABLE_MSG,
+    DEFAULT_PORT_FILE,
+    DEFAULT_SOCKET_PATH,
+    SOCKET_PATH,
+    SSO_ALLOWLIST,
+    ActionInterceptionError,
+    BrowserUnavailableError,
+    ChromeBridgeError,
+    ElementNotFoundError,
+    NavigationTimeoutError,
+    RunawayLoopDetectedError,
+    SecurityException,
+    TargetLocator,
+    _extract_hostname,
+    _format_ref_id,
+    normalize_locator,
 )
-
-
-class BrowserUnavailableError(ChromeBridgeError):
-    """Raised when the browser is not running, unreachable, or disconnected."""
-
-    def __init__(
-        self,
-        message: str = DEFAULT_BROWSER_UNAVAILABLE_MSG,
-        tab_id: Optional[int] = None,
-    ):
-        super().__init__(message, tab_id)
-
-
-def _format_ref_id(ref: Union[str, int]) -> str:
-    """Format a Ref-ID into canonical [#X] representation."""
-    r_str = str(ref).strip()
-    if not r_str.startswith("#") and not r_str.startswith("[#"):
-        r_str = f"#{r_str}"
-    if not r_str.startswith("["):
-        r_str = f"[{r_str}]"
-    return r_str
-
-
-class ElementNotFoundError(ChromeBridgeError):
-    """Raised when a Ref-ID or CSS selector cannot be located."""
-
-    def __init__(
-        self,
-        target: str,
-        tab_id: Optional[int] = None,
-        stale: bool = False,
-        suggestions: Optional[List[Dict[str, Any]]] = None,
-        url: str = "",
-        auto_snapshot: Optional[str] = None,
-    ):
-        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
-        url_str = f" (URL: {url})" if url else ""
-        msg = f"Element matching '{target}' not found{tab_str}{url_str}."
-        if stale:
-            msg += " The DOM mutated since the last snapshot was generated."
-        if suggestions:
-            sug_list = []
-            for s in suggestions:
-                ref = _format_ref_id(s.get("ref", ""))
-                role = s.get("role", "element")
-                name = s.get("name", "")
-                sug_list.append(f"{ref} ({role} '{name}')")
-            msg += f" Did you mean: {', '.join(sug_list)}?"
-
-        super().__init__(msg, tab_id)
-        self.auto_snapshot = auto_snapshot
-        self.target = target
-        self.stale = stale
-        self.suggestions = suggestions or []
-        self.url = url
-
-
-class ActionInterceptionError(ChromeBridgeError):
-    """Raised when coordinate hit-testing is intercepted by an overlapping element."""
-
-    def __init__(
-        self,
-        target: str,
-        interceptor_tag: str = "",
-        interceptor_ref: Optional[Union[str, int]] = None,
-        interceptor_desc: str = "",
-        tab_id: Optional[int] = None,
-    ):
-        ref_formatted = _format_ref_id(interceptor_ref) if interceptor_ref is not None else ""
-
-        interceptor_label = (
-            f"{ref_formatted} ({interceptor_desc})"
-            if ref_formatted
-            else (f"<{interceptor_tag}> ({interceptor_desc})" if interceptor_desc else f"<{interceptor_tag}>")
-        )
-        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
-        msg = (
-            f"Click on target '{target}' was intercepted by overlapping element "
-            f"{interceptor_label}{tab_str}. Dismiss or close the overlay before interacting with the target."
-        )
-        super().__init__(msg, tab_id)
-        self.target = target
-        self.interceptor_tag = interceptor_tag
-        self.interceptor_ref = interceptor_ref
-
-
-class NavigationTimeoutError(ChromeBridgeError):
-    """Raised when navigation or element condition waiting exceeds deadline."""
-
-    def __init__(
-        self,
-        target: Optional[str] = None,
-        timeout: float = 10.0,
-        url: str = "",
-        ready_state: str = "unknown",
-        dom_state: str = "unknown",
-        tab_id: Optional[int] = None,
-    ):
-        tab_str = f" in tab {tab_id}" if tab_id is not None else ""
-        msg = f"Timed out after {timeout:.1f}s waiting for '{target or url}'{tab_str}."
-        if url or ready_state or dom_state:
-            msg += f" (Current URL: {url}, readyState: '{ready_state}', DOM state: '{dom_state}')"
-        super().__init__(msg, tab_id)
-        self.timeout = timeout
-        self.url = url
-        self.ready_state = ready_state
-        self.dom_state = dom_state
-
-
-def normalize_locator(target: TargetLocator) -> Dict[str, Any]:
-    """Normalize integer, Ref-ID string, or CSS selector into an IPC target payload."""
-    if isinstance(target, int):
-        return {"type": "ref", "refId": target}
-
-    target_str = str(target).strip()
-
-    # Matches [#12] or [# 12]
-    m_bracket = re.match(r"^\[#\s*(\d+)\]$", target_str)
-    if m_bracket:
-        return {"type": "ref", "refId": int(m_bracket.group(1))}
-
-    # Matches #12 (pure number following #)
-    m_hash = re.match(r"^#(\d+)$", target_str)
-    if m_hash:
-        return {"type": "ref", "refId": int(m_hash.group(1))}
-
-    # Matches ref:12 or ref=12
-    m_ref = re.match(r"^ref[:=](\d+)$", target_str, re.IGNORECASE)
-    if m_ref:
-        return {"type": "ref", "refId": int(m_ref.group(1))}
-
-    # Standard CSS selector
-    return {"type": "css", "selector": target_str}
-
-
-class ChromeSocketClient:
-    """Synchronous IPC client for Chrome Bridge native host."""
-
-    def __init__(self, socket_path: str = SOCKET_PATH, port_file: Optional[str] = None):
-        self.socket_path = socket_path
-        if port_file is not None:
-            self.port_file = port_file
-        elif socket_path != DEFAULT_SOCKET_PATH:
-            self.port_file = os.path.splitext(socket_path)[0] + ".port"
-        else:
-            self.port_file = DEFAULT_PORT_FILE
-        self._sock: Optional[socket.socket] = None
-        self._req_id = 0
-        self._buffer = b""
-
-    def connect(self, retries: int = 5, backoff: float = 0.2) -> None:
-        if self._sock:
-            return
-
-        use_tcp = os.name == "nt" or not hasattr(socket, "AF_UNIX")
-
-        for i in range(retries):
-            try:
-                if use_tcp:
-                    if not os.path.exists(self.port_file):
-                        raise FileNotFoundError(f"Port file '{self.port_file}' does not exist.")
-                    with open(self.port_file, "r", encoding="utf-8", errors="replace") as f:
-                        port_str = f.read().strip()
-                    if not port_str:
-                        raise ValueError("Port file is empty.")
-                    port = int(port_str)
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.connect(("127.0.0.1", port))
-                else:
-                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    s.connect(self.socket_path)
-                s.settimeout(20.0)
-                self._sock = s
-                return
-            except (socket.error, FileNotFoundError, ValueError) as err:
-                if i == retries - 1:
-                    raise BrowserUnavailableError() from err
-                time.sleep(backoff * (i + 1))
-
-    def close(self) -> None:
-        if self._sock:
-            try:
-                self._sock.close()
-            except Exception:
-                pass
-            self._sock = None
-            self._buffer = b""
-
-    def call(self, action: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Any:
-        self.connect()
-        self._req_id += 1
-        req_id = self._req_id
-        req_payload = {
-            "id": req_id,
-            "action": action,
-            "params": params or {},
-        }
-        data = json.dumps(req_payload) + "\n"
-
-        try:
-            assert self._sock is not None
-            self._sock.settimeout(timeout)
-            self._sock.sendall(data.encode("utf-8"))
-
-            while True:
-                # Check buffer for a complete line
-                if b"\n" in self._buffer:
-                    line, self._buffer = self._buffer.split(b"\n", 1)
-                    if not line.strip():
-                        continue
-                    resp = json.loads(line.decode("utf-8", errors="replace"))
-                    if resp.get("id") == req_id:
-                        if not resp.get("success", False):
-                            self._raise_structured_error(resp, params)
-                        return resp.get("result")
-
-                chunk = self._sock.recv(65536)
-                if not chunk:
-                    raise BrowserUnavailableError("Browser session disconnected unexpectedly.")
-                self._buffer += chunk
-
-        except socket.timeout:
-            self.close()
-            raise NavigationTimeoutError(
-                target=str(params.get("target") if params else action),
-                timeout=timeout,
-                url=params.get("url", "") if params else "",
-            )
-        except Exception as e:
-            if isinstance(e, ChromeBridgeError):
-                raise
-            self.close()
-            raise BrowserUnavailableError(f"Browser communication error during '{action}'.") from e
-
-    def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
-        err_data = resp.get("error")
-        auto_snapshot = resp.get("auto_snapshot")
-        if isinstance(err_data, dict) and not auto_snapshot:
-            auto_snapshot = err_data.get("auto_snapshot")
-
-        target_loc = params.get("target") if params else None
-        target_str = ""
-        if isinstance(target_loc, dict):
-            if target_loc.get("type") == "ref":
-                target_str = f"[#{target_loc.get('refId')}]"
-            else:
-                target_str = str(target_loc.get("selector", ""))
-        elif target_loc is not None:
-            target_str = str(target_loc)
-
-        tab_id = params.get("tabId") if params else None
-
-        exc = None
-        if isinstance(err_data, dict):
-            code = err_data.get("code") or err_data.get("name")
-            if code == "ELEMENT_NOT_FOUND" or "not found" in str(err_data.get("message", "")).lower():
-                exc = ElementNotFoundError(
-                    target=err_data.get("target", target_str),
-                    tab_id=err_data.get("tabId", tab_id),
-                    stale=err_data.get("stale", False),
-                    suggestions=err_data.get("suggestions", []),
-                    url=err_data.get("url", ""),
-                )
-            elif code == "ACTION_INTERCEPTED":
-                exc = ActionInterceptionError(
-                    target=err_data.get("target", target_str),
-                    interceptor_tag=err_data.get("interceptorTag", "overlay"),
-                    interceptor_ref=err_data.get("interceptorRef"),
-                    interceptor_desc=err_data.get("interceptorDesc", ""),
-                    tab_id=err_data.get("tabId", tab_id),
-                )
-            elif code == "TIMEOUT":
-                exc = NavigationTimeoutError(
-                    target=err_data.get("target", target_str),
-                    timeout=err_data.get("timeout", 10.0),
-                    url=err_data.get("url", ""),
-                    ready_state=err_data.get("readyState", "unknown"),
-                    dom_state=err_data.get("domState", "unknown"),
-                    tab_id=err_data.get("tabId", tab_id),
-                )
-            else:
-                exc = ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
-        else:
-            err_str = str(err_data)
-            if "not found" in err_str.lower():
-                exc = ElementNotFoundError(target=target_str, tab_id=tab_id)
-            elif "intercepted" in err_str.lower():
-                exc = ActionInterceptionError(target=target_str, tab_id=tab_id)
-            elif "timed out" in err_str.lower():
-                exc = NavigationTimeoutError(target=target_str, tab_id=tab_id)
-            else:
-                exc = ChromeBridgeError(err_str, tab_id=tab_id)
-
-        if auto_snapshot and exc:
-            exc.auto_snapshot = auto_snapshot
-        if exc:
-            raise exc
-
+from chrome_bridge.security import (
+    ActionTracker,
+    ChromeBridgeWorkerTelemetry,
+    SafetyController,
+    SecurityGateway,
+    defang_telemetry_payload,
+    global_safety,
+    wrap_untrusted_data,
+)
+from chrome_bridge.transport import (
+    ChromeSocketClient,
+    TransportClient,
+)
+from chrome_bridge.compiler import (
+    DomBatchSynthesizer,
+    DomCompiler,
+    _DISCOVERY_HELPER_JS,
+)
 
 
 class TabMedia:
@@ -759,17 +184,7 @@ class TabMedia:
         self._tab = tab
 
     def status(self) -> Dict[str, Any]:
-        """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs.
-
-        Returns:
-            Dict containing `found` (bool), `paused` (bool), `currentTime` (float),
-            `duration` (float), `volume` (float), `muted` (bool), `title` (str),
-            `artist` (str), `album` (str), and `playbackState` ('playing', 'paused', 'none').
-
-        Example:
-            >>> state = chrome.media.status()
-            >>> print(f"Now playing: {state.get('title')} (paused: {state.get('paused')})")
-        """
+        """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs."""
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -793,14 +208,7 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def toggle(self) -> Dict[str, Any]:
-        """Toggle play/pause on the active media element.
-
-        Returns:
-            Dict with `success` (bool) and `action` ('played' or 'paused').
-
-        Example:
-            >>> chrome.media.toggle()
-        """
+        """Toggle play/pause on the active media element."""
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -818,11 +226,7 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def play(self) -> Dict[str, Any]:
-        """Resume playback on the active media element.
-
-        Example:
-            >>> chrome.media.play()
-        """
+        """Resume playback on the active media element."""
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -834,11 +238,7 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def pause(self) -> Dict[str, Any]:
-        """Pause playback on the active media element.
-
-        Example:
-            >>> chrome.media.pause()
-        """
+        """Pause playback on the active media element."""
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -850,18 +250,7 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def seek(self, seconds: float) -> Dict[str, Any]:
-        """Seek relative (+/- seconds) or step playback time.
-
-        Args:
-            seconds: Relative time delta in seconds (e.g. +15.0 to skip ahead, -10.0 to rewind).
-
-        Returns:
-            Dict with `success` (bool) and updated `currentTime` (float).
-
-        Example:
-            >>> chrome.media.seek(15.0)  # Skip 15s forward
-            >>> chrome.media.seek(-10.0) # Rewind 10s
-        """
+        """Seek relative (+/- seconds) or step playback time."""
         js = f"""
         (() => {{
             {self._FIND_MEDIA_JS}
@@ -874,14 +263,7 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
     def set_volume(self, volume: float) -> Dict[str, Any]:
-        """Set media volume level between 0.0 (muted) and 1.0 (max).
-
-        Args:
-            volume: Float volume value from 0.0 to 1.0.
-
-        Example:
-            >>> chrome.media.set_volume(0.75)
-        """
+        """Set media volume level between 0.0 (muted) and 1.0 (max)."""
         volume = max(0.0, min(1.0, float(volume)))
         js = f"""
         (() => {{
@@ -892,303 +274,6 @@ class TabMedia:
         }})()
         """
         return self._tab.eval_js(js) or {}
-
-
-_DISCOVERY_HELPER_JS = """
-function __cb_is_visible(el) {
-    if (!el || el.nodeType !== 1) return false;
-    if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return false;
-    if (typeof el.checkVisibility === 'function') {
-        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
-            if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
-            return false;
-        }
-    }
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) < 0.05) return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) {
-        if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
-        return false;
-    }
-    return true;
-}
-
-function __cb_tag(el) {
-    if (!el) return null;
-    if (!window.__cb_handle_counter) window.__cb_handle_counter = 0;
-    let bridgeId = el.getAttribute('data-cbridge-id');
-    if (!bridgeId) {
-        bridgeId = 'cb_' + (++window.__cb_handle_counter) + '_' + Date.now().toString(36);
-        el.setAttribute('data-cbridge-id', bridgeId);
-    }
-    const text = (el.innerText || el.textContent || el.value || '').trim();
-    const role = el.getAttribute('role') || el.tagName.toLowerCase();
-    return {
-        selector: '[data-cbridge-id="' + bridgeId + '"]',
-        tagName: el.tagName.toLowerCase(),
-        role: role,
-        text: text.slice(0, 100),
-        id: el.id || '',
-        name: el.getAttribute('name') || '',
-        placeholder: el.getAttribute('placeholder') || '',
-        value: el.value || ''
-    };
-}
-"""
-
-
-class DomBatchSynthesizer:
-    """Pure compiler and code generation module for in-page compound batch operations and DOM discovery.
-
-    Translates high-level batch intents (element finding heuristics, structured data extraction,
-    and search engine shortcuts) into optimized, single-pass JavaScript execution payloads.
-    """
-
-    SEARCH_ENGINES: Dict[str, str] = {
-        "google": "https://www.google.com/search?q={query}",
-        "g": "https://www.google.com/search?q={query}",
-        "bing": "https://www.bing.com/search?q={query}",
-        "b": "https://www.bing.com/search?q={query}",
-        "duckduckgo": "https://duckduckgo.com/?q={query}",
-        "ddg": "https://duckduckgo.com/?q={query}",
-        "youtube": "https://www.youtube.com/results?search_query={query}",
-        "yt": "https://www.youtube.com/results?search_query={query}",
-        "github": "https://github.com/search?q={query}",
-        "gh": "https://github.com/search?q={query}",
-    }
-
-    @classmethod
-    def compile_search_url(cls, query: str, engine: str = "google") -> str:
-        """Resolve target search engine URL for a given query string."""
-        import urllib.parse
-        q_enc = urllib.parse.quote_plus(query)
-        eng_lower = engine.lower().strip()
-        if eng_lower in cls.SEARCH_ENGINES:
-            return cls.SEARCH_ENGINES[eng_lower].format(query=q_enc)
-        elif "{query}" in engine:
-            return engine.replace("{query}", q_enc)
-        elif engine.startswith("http://") or engine.startswith("https://"):
-            return f"{engine}?q={q_enc}" if "?" not in engine else f"{engine}&q={q_enc}"
-        else:
-            return f"https://www.google.com/search?q={q_enc}"
-
-    @classmethod
-    def compile_extract_items_js(cls, container_selector: str, fields: Dict[str, str]) -> str:
-        """Generate JavaScript payload for structured multi-field extraction across container elements."""
-        return f"""
-        (() => {{
-            const containerSelector = {json.dumps(container_selector)};
-            const fields = {json.dumps(fields)};
-            const containers = Array.from(document.querySelectorAll(containerSelector));
-            const results = [];
-
-            for (const container of containers) {{
-                const row = {{}};
-                for (const [key, fieldSel] of Object.entries(fields)) {{
-                    let targetEl = container;
-                    let attrName = null;
-                    let sel = (fieldSel || '').trim();
-
-                    if (sel.includes('@')) {{
-                        const parts = sel.split('@');
-                        const subSel = parts[0].trim();
-                        attrName = parts[1].trim();
-                        if (subSel && subSel !== '.' && subSel !== 'self' && subSel.toLowerCase() !== 'text') {{
-                            targetEl = container.querySelector(subSel);
-                        }}
-                    }} else if (sel && sel !== '.' && sel !== 'self' && sel.toLowerCase() !== 'text') {{
-                        targetEl = container.querySelector(sel);
-                    }}
-
-                    if (!targetEl) {{
-                        row[key] = "";
-                    }} else if (attrName) {{
-                        if (attrName.toLowerCase() === 'text') {{
-                            row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
-                        }} else {{
-                            const val = targetEl.getAttribute(attrName);
-                            row[key] = (val !== null && val !== undefined ? val : "").toString().trim();
-                        }}
-                    }} else {{
-                        row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
-                    }}
-                }}
-                results.push(row);
-            }}
-            return results;
-        }})()
-        """
-
-    @classmethod
-    def compile_query_all_js(cls, css_selector: str) -> str:
-        """Generate JavaScript payload for finding and tagging all visible elements matching a CSS selector."""
-        return f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            const selector = {json.dumps(css_selector)};
-            const all = document.querySelectorAll(selector);
-            const results = [];
-            for (const el of all) {{
-                if (__cb_is_visible(el)) {{
-                    const tagged = __cb_tag(el);
-                    if (tagged) results.push(tagged);
-                }}
-            }}
-            return results;
-        }})()
-        """
-
-    @classmethod
-    def compile_find_css_js(cls, target_str: str) -> str:
-        """Generate JavaScript payload for locating a visible element by CSS selector."""
-        return f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            try {{
-                const el = document.querySelector({json.dumps(target_str)});
-                if (el && __cb_is_visible(el)) return __cb_tag(el);
-            }} catch (e) {{}}
-            return null;
-        }})()
-        """
-
-    @classmethod
-    def compile_text_finder_js(cls, text: str, exact: bool = False) -> str:
-        """Generate JavaScript payload for finding a visible element by inner or accessible text."""
-        return f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            const query = {json.dumps(text)};
-            const exact = {json.dumps(exact)};
-            const qLower = query.toLowerCase();
-
-            const candidates = [];
-            const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
-            for (const el of all) {{
-                if (!__cb_is_visible(el)) continue;
-                const txt = (el.innerText || el.textContent || '').trim();
-                if (!txt) continue;
-                const tLower = txt.toLowerCase();
-                
-                let match = false;
-                let score = 0;
-                if (exact) {{
-                    if (tLower === qLower) {{ match = true; score = 100; }}
-                }} else {{
-                    if (tLower === qLower) {{ match = true; score = 100; }}
-                    else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
-                }}
-
-                if (match) {{
-                    const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
-                    if (isInteractive) score += 30;
-                    score -= Math.min(20, el.children.length * 5);
-                    candidates.push({{ el, score }});
-                }}
-            }}
-
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
-        }})()
-        """
-
-    @classmethod
-    def compile_input_finder_js(cls, placeholder_or_label: str) -> str:
-        """Generate JavaScript payload for finding an input, textarea, or select by placeholder, label, or name."""
-        return f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            const query = {json.dumps(placeholder_or_label)};
-            const qLower = query.toLowerCase();
-
-            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
-            const candidates = [];
-
-            for (const el of inputs) {{
-                if (!__cb_is_visible(el)) continue;
-                let score = 0;
-
-                const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
-                if (placeholder === qLower) score = 100;
-                else if (placeholder.includes(qLower)) score = 80;
-
-                const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
-                if (ariaLabel === qLower) score = Math.max(score, 95);
-                else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
-
-                const name = (el.getAttribute('name') || '').trim().toLowerCase();
-                const id = (el.id || '').trim().toLowerCase();
-                if (name === qLower || id === qLower) score = Math.max(score, 90);
-                else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
-
-                if (el.id) {{
-                    try {{
-                        const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-                        if (labelEl) {{
-                            const lText = labelEl.innerText.trim().toLowerCase();
-                            if (lText === qLower) score = Math.max(score, 95);
-                            else if (lText.includes(qLower)) score = Math.max(score, 75);
-                        }}
-                    }} catch (e) {{}}
-                }}
-                const parentLabel = el.closest('label');
-                if (parentLabel) {{
-                    const lText = parentLabel.innerText.trim().toLowerCase();
-                    if (lText === qLower) score = Math.max(score, 90);
-                    else if (lText.includes(qLower)) score = Math.max(score, 70);
-                }}
-
-                if (score > 0) {{
-                    candidates.push({{ el, score }});
-                }}
-            }}
-
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
-        }})()
-        """
-
-    @classmethod
-    def compile_button_finder_js(cls, name: str, exact: bool = False) -> str:
-        """Generate JavaScript payload for finding a button or clickable role by visible name."""
-        return f"""
-        (() => {{
-            {_DISCOVERY_HELPER_JS}
-            const query = {json.dumps(name)};
-            const exact = {json.dumps(exact)};
-            const qLower = query.toLowerCase();
-
-            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
-            const candidates = [];
-
-            for (const el of buttons) {{
-                if (!__cb_is_visible(el)) continue;
-                const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
-                if (!txt) continue;
-                const tLower = txt.toLowerCase();
-
-                let score = 0;
-                if (exact) {{
-                    if (tLower === qLower) score = 100;
-                }} else {{
-                    if (tLower === qLower) score = 100;
-                    else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
-                }}
-
-                if (score > 0) {{
-                    if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
-                    candidates.push({{ el, score }});
-                }}
-            }}
-
-            if (candidates.length === 0) return null;
-            candidates.sort((a, b) => b.score - a.score);
-            return __cb_tag(candidates[0].el);
-        }})()
-        """
 
 
 class ElementHandle:
@@ -1325,7 +410,7 @@ class Tab:
     def __init__(
         self,
         tab_id: Optional[int] = None,
-        client: Optional[ChromeSocketClient] = None,
+        client: Optional[TransportClient] = None,
         title: str = "",
         url: str = "",
         active: bool = False,
@@ -1336,12 +421,11 @@ class Tab:
         self.url = url
         self.active = active
         self._media_controller: Optional[TabMedia] = None
-        self.allowed_origins: set = set()
+        self.allowed_origins: Set[str] = set()
         if self.url:
             host = _extract_hostname(self.url)
             if host:
                 self.allowed_origins.add(host)
-        self._action_tracker = ActionTracker()
         self.safety = global_safety
 
     def __repr__(self) -> str:
@@ -1392,61 +476,39 @@ class Tab:
         text: str = "",
         safety_check: bool = True,
     ) -> None:
-        if safety_check and not self.safety.is_destructive_permitted:
-            target_str = str(target) if target is not None else ""
-            if CRITICAL_DELETION_REGEX.search(target_str):
-                raise SecurityException(
-                    f"Destructive action blocked: Target '{target_str}' matches critical deletion pattern.",
-                    status="BLOCKED_DESTRUCTIVE_ACTION",
-                    tab_id=self.id,
-                )
-            if text and CRITICAL_DELETION_REGEX.search(text):
-                raise SecurityException(
-                    f"Destructive action blocked: Input text '{text}' matches critical deletion pattern.",
-                    status="BLOCKED_DESTRUCTIVE_ACTION",
-                    tab_id=self.id,
-                )
-
-        self._action_tracker.record_and_validate(action, target, self.url, tab_id=self.id)
+        """Verify action against SecurityGateway Layer 2 and Layer 5."""
+        self.safety.verify_action(
+            action=action,
+            target=target,
+            url=self.url,
+            tab_id=self.id,
+            text=text,
+            safety_check=safety_check,
+        )
 
     def activate(self) -> Dict[str, Any]:
         """Focus and switch to this tab."""
         return self._client.call("switch_tab", {"tabId": self.id})
 
     def close(self) -> Dict[str, Any]:
-        """
-        Safely closes the tab. If this is the last open tab in the browser,
-        it spawns a clean 'about:blank' tab first to prevent Chrome from
-        terminating the entire window and severing the bridge connection.
-        """
+        """Safely closes the tab."""
         try:
             tabs = self._client.call("list_tabs")
             if isinstance(tabs, list) and len(tabs) <= 1:
                 self._client.call("navigate", {"url": "about:blank", "newTab": True})
             return self._client.call("close_tab", {"tabId": self.id})
         except Exception:
-            # Fallback to direct close if tab listing fails
             return self._client.call("close_tab", {"tabId": self.id})
 
     def navigate(self, url: str, timeout: float = 30.0, safety_check: bool = True) -> Dict[str, Any]:
-        """
-        Navigates the tab to the specified URL while neutralizing
-        any 'beforeunload' dialogs (e.g., Leave/Stay prompts).
-        """
-        target_host = _extract_hostname(url)
-        if safety_check and target_host:
-            tab_origins = set(self.allowed_origins)
-            if self.url:
-                current_host = _extract_hostname(self.url)
-                if current_host:
-                    tab_origins.add(current_host)
-
-            if tab_origins and not self.safety.is_origin_allowed(target_host, tab_origins):
-                raise SecurityException(
-                    f"Navigation blocked: '{url}' is outside task scope.",
-                    status="BLOCKED_ORIGIN_VIOLATION",
-                    tab_id=self.id,
-                )
+        """Navigates the tab to the specified URL while enforcing origin locking."""
+        self.safety.verify_navigation(
+            url=url,
+            current_url=self.url,
+            tab_origins=self.allowed_origins,
+            tab_id=self.id,
+            safety_check=safety_check,
+        )
 
         try:
             self.eval_js("""
@@ -1456,11 +518,11 @@ class Tab:
                 }, true);
             """)
         except Exception:
-            # Ignore errors if page is not in a valid JS state or already unloading
             pass
 
         res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
         self.url = res.get("url", url) if isinstance(res, dict) else url
+        target_host = _extract_hostname(url)
         if target_host:
             self.allowed_origins.add(target_host)
         return res
@@ -1477,29 +539,13 @@ class Tab:
         """Navigate forward in history."""
         return self._client.call("go_forward", {"tabId": self.id})
 
-    def snapshot(self, compact: bool = True, wrap: bool = True) -> str:
-        """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs.
-
-        Produces an accessible outline of interactive elements, tagging each with
-        an integer Ref-ID (e.g., `[#1]`, `[#2]`).
-
-        Args:
-            compact: If True, filters out non-interactive layout noise.
-            wrap: If True, wraps output in <UNTRUSTED_EXTERNAL_DATA> security boundaries.
-
-        Returns:
-            Formatted semantic snapshot string.
-
-        Example:
-            >>> print(chrome.snapshot())
-            # Output:
-            # [#1] <input type="text" placeholder="Search Google">
-            # [#2] <button type="submit">Search</button>
-        """
-        res = self._client.call("get_page_content", {"tabId": self.id, "compact": compact})
+    def snapshot(self, compact: bool = True, wrap: bool = True, format: Optional[str] = None, max_tokens: Optional[int] = None) -> str:
+        """Generate a token-optimized Semantic DOM Snapshot with Ref-IDs."""
+        is_compact = (format == "compact") if format is not None else compact
+        res = self._client.call("get_page_content", {"tabId": self.id, "compact": is_compact})
         raw = res.get("snapshot", "") if isinstance(res, dict) else str(res)
         if wrap:
-            return wrap_untrusted_data(raw, origin=self.origin, selector="document")
+            return self.safety.sanitize_inbound(raw, origin=self.origin, selector="document")
         return raw
 
     def click(
@@ -1509,23 +555,7 @@ class Tab:
         count: int = 1,
         safety_check: bool = True,
     ) -> Dict[str, Any]:
-        """Click an element identified by Ref-ID or CSS selector.
-
-        Args:
-            target: Element locator. Accepts integer Ref-ID (`14`), bracketed Ref-ID (`"[#14]"`),
-                hash Ref-ID (`"#14"`), or CSS selector (`"button.submit"`, `"#search-btn"`).
-            button: Mouse button ('left', 'right', 'middle'). Default is 'left'.
-            count: Click count (1 for single click, 2 for double click).
-            safety_check: If True, blocks clicks matching critical destructive terms.
-
-        Returns:
-            Dict containing action response telemetry.
-
-        Examples:
-            >>> chrome.click(14)
-            >>> chrome.click("[#14]")
-            >>> chrome.click("button.submit-form")
-        """
+        """Click an element identified by Ref-ID or CSS selector."""
         self._safety_check_action("click", target, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
@@ -1542,20 +572,7 @@ class Tab:
         press_enter: bool = False,
         safety_check: bool = True,
     ) -> Dict[str, Any]:
-        """Type text into an input, textarea, or contenteditable element.
-
-        Args:
-            target: Element locator (e.g. `2`, `"[#2]"`, or `"input[name='q']"`).
-            text: Text string to type.
-            clear: If True, clears existing content before typing. Default is True.
-            press_enter: If True, simulates pressing Enter key after typing. Default is False.
-            safety_check: If True, checks safety policies against typed text.
-
-        Examples:
-            >>> chrome.type("[#2]", "Claude Sonnet", press_enter=True)
-            >>> chrome.type(2, "search query", clear=True)
-            >>> chrome.type("input[type='search']", "Python SDK")
-        """
+        """Type text into an input, textarea, or contenteditable element."""
         self._safety_check_action("type", target, text=text, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call(
@@ -1571,147 +588,54 @@ class Tab:
         )
 
     def press_key(self, key: str, safety_check: bool = True) -> Dict[str, Any]:
-        """Press a keyboard key (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown').
-
-        Args:
-            key: Key identifier name.
-            safety_check: If True, checks safety policies against the action.
-
-        Example:
-            >>> chrome.press_key("Enter")
-            >>> chrome.press_key("Escape")
-        """
+        """Press a keyboard key (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown')."""
         self._safety_check_action("press_key", key, safety_check=safety_check)
         return self._client.call("press_key", {"key": key, "tabId": self.id})
 
     def select(self, target: TargetLocator, value: str, safety_check: bool = True) -> Dict[str, Any]:
-        """Select an option in a <select> dropdown by value or label.
-
-        Args:
-            target: Element locator (e.g. `5`, `"[#5]"`, or `"select#country"`).
-            value: Option value or visible text to select.
-            safety_check: If True, checks safety policies against the action.
-
-        Example:
-            >>> chrome.select("[#5]", "US")
-            >>> chrome.select("select#country", "United States")
-        """
+        """Select an option in a <select> dropdown by value or label."""
         self._safety_check_action("select", target, text=value, safety_check=safety_check)
         loc = normalize_locator(target)
         return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id})
 
     def hover(self, target: TargetLocator) -> Dict[str, Any]:
-        """Hover mouse pointer over an element to trigger tooltips or dropdown menus.
-
-        Args:
-            target: Element locator (e.g. `8`, `"[#8]"`, or `".dropdown-trigger"`).
-
-        Example:
-            >>> chrome.hover("[#8]")
-        """
+        """Hover mouse pointer over an element to trigger tooltips or dropdown menus."""
         loc = normalize_locator(target)
         return self._client.call("hover", {"target": loc, "tabId": self.id})
 
     def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
-        """Scroll the window or a specific scrollable container.
-
-        Args:
-            x: Horizontal pixel delta to scroll.
-            y: Vertical pixel delta to scroll. Default is 500.
-            target: Optional container locator to scroll within.
-
-        Example:
-            >>> chrome.scroll(y=800)
-            >>> chrome.scroll(y=300, target="[#feed-container]")
-        """
-        self._action_tracker.record_and_validate("scroll", target, self.url, tab_id=self.id)
+        """Scroll the window or a specific scrollable container."""
+        self._safety_check_action("scroll", target)
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("scroll", {"x": x, "y": y, "target": loc, "tabId": self.id})
 
     def get_text(self, target: TargetLocator, wrap: bool = True) -> str:
-        """Extract inner text content of an element.
-
-        Args:
-            target: Element locator (e.g. `3`, `"[#3]"`, or `"article.post"`).
-            wrap: If True, encloses extracted text in <UNTRUSTED_EXTERNAL_DATA> tags.
-
-        Returns:
-            Extracted text content string.
-
-        Example:
-            >>> text = chrome.get_text("[#3]")
-            >>> print(text)
-        """
+        """Extract inner text content of an element."""
         loc = normalize_locator(target)
         res = self._client.call("get_text", {"target": loc, "tabId": self.id})
         raw = res.get("text", "") if isinstance(res, dict) else str(res)
         if wrap:
-            return wrap_untrusted_data(raw, origin=self.origin, selector=str(target))
+            return self.safety.sanitize_inbound(raw, origin=self.origin, selector=str(target))
         return raw
 
     def get_attribute(self, target: TargetLocator, name: str) -> Optional[str]:
-        """Retrieve the value of an element DOM attribute.
-
-        Args:
-            target: Element locator (e.g. `3`, `"[#3]"`, or `"a.download"`).
-            name: Name of the attribute (e.g. 'href', 'src', 'data-id').
-
-        Returns:
-            Attribute value as a string, or None if not found.
-
-        Example:
-            >>> link = chrome.get_attribute("[#3]", "href")
-        """
+        """Retrieve the value of an element DOM attribute."""
         loc = normalize_locator(target)
         res = self._client.call("get_attribute", {"target": loc, "name": name, "tabId": self.id})
         return res.get("value") if isinstance(res, dict) else None
 
     def eval_js(self, script: str, target: Optional[TargetLocator] = None) -> Any:
-        """Execute JavaScript directly in the active tab context.
-
-        Args:
-            script: JavaScript source string to evaluate.
-            target: Optional element locator. If provided, `this` in script references the element.
-
-        Returns:
-            JSON-serializable result of the JavaScript execution.
-
-        Example:
-            >>> title = chrome.eval_js("document.title")
-            >>> items = chrome.eval_js("Array.from(document.querySelectorAll('h3')).map(e => e.innerText)")
-        """
+        """Execute JavaScript directly in the active tab context."""
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("execute_script", {"code": script, "target": loc, "tabId": self.id})
 
     def screenshot(self, path: Optional[str] = None) -> str:
-        """Capture a page screenshot.
-
-        Args:
-            path: Optional filesystem path to save the PNG image.
-
-        Returns:
-            Base64 PNG data URL string.
-
-        Example:
-            >>> data_url = chrome.screenshot()
-        """
+        """Capture a page screenshot."""
         res = self._client.call("screenshot", {"path": path, "tabId": self.id})
         return res.get("dataUrl") or res.get("data", "")
 
     def wait_for(self, target: TargetLocator, timeout: float = 10.0, state: str = "visible") -> bool:
-        """Synchronously wait for an element to reach a target lifecycle state.
-
-        Args:
-            target: Element locator (e.g. `10`, `"[#10]"`, or `"#results"`).
-            timeout: Maximum seconds to wait before timing out. Default is 10.0.
-            state: Expected element condition: 'visible', 'hidden', or 'attached'.
-
-        Returns:
-            True if element reached the state within timeout.
-
-        Example:
-            >>> chrome.wait_for("[#10]", timeout=5.0, state="visible")
-        """
+        """Synchronously wait for an element to reach a target lifecycle state."""
         loc = normalize_locator(target)
         return self._client.call(
             "wait_for",
@@ -1720,18 +644,7 @@ class Tab:
         )
 
     def wait_for_url(self, pattern: str, timeout: float = 15.0) -> bool:
-        r"""Synchronously wait for current URL to match a regex pattern.
-
-        Args:
-            pattern: Regex pattern to match against current URL.
-            timeout: Maximum seconds to wait before timing out. Default is 15.0.
-
-        Returns:
-            True if URL matches pattern within timeout.
-
-        Example:
-            >>> chrome.wait_for_url(r"github\\.com/settings")
-        """
+        r"""Synchronously wait for current URL to match a regex pattern."""
         return self._client.call(
             "wait_for_url",
             {"pattern": pattern, "timeout": timeout, "tabId": self.id},
@@ -1780,94 +693,36 @@ class Tab:
         )
 
     def _collect_fuzzy_suggestions(self, query: str) -> List[Dict[str, Any]]:
-        import json
-        try:
-            js = f"""
-            (() => {{
-                const query = {json.dumps(query)}.toLowerCase();
-                const all = document.querySelectorAll('button, a, input, select, textarea, [role]');
-                const suggestions = [];
-                for (const el of all) {{
-                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim();
-                    if (!txt) continue;
-                    const tLower = txt.toLowerCase();
-                    if (tLower.includes(query) || query.includes(tLower) || tLower.slice(0, 3) === query.slice(0, 3)) {{
-                        const role = el.getAttribute('role') || el.tagName.toLowerCase();
-                        let ref = el.getAttribute('data-cbridge-id') || el.id || '';
-                        suggestions.push({{
-                            'ref': ref ? '#' + ref : '#element',
-                            'role': role,
-                            'name': txt.slice(0, 50)
-                        }});
-                        if (suggestions.length >= 5) break;
-                    }}
-                }}
-                return suggestions;
-            }})()
-            """
-            res = self.eval_js(js)
-            if isinstance(res, list):
-                return res
-            elif isinstance(res, dict) and isinstance(res.get("result"), list):
-                return res["result"]
-        except Exception:
-            pass
-        return []
+        return DomCompiler.collect_fuzzy_suggestions(self, query)
 
     def _poll_find(self, finder_func, query: str, timeout: float = 1.5, interval: float = 0.1) -> ElementHandle:
-        deadline = time.time() + max(0.0, timeout)
-        while True:
-            try:
-                info = finder_func()
-                if isinstance(info, dict) and "result" in info and isinstance(info["result"], dict):
-                    info = info["result"]
-                if isinstance(info, dict) and (info.get("selector") or info.get("target")):
-                    return ElementHandle(
-                        tab=self,
-                        target=info.get("selector") or info.get("target"),
-                        tag_name=info.get("tagName", ""),
-                        role=info.get("role", ""),
-                        text=info.get("text", ""),
-                    )
-            except Exception:
-                pass
-            if time.time() >= deadline:
-                break
-            time.sleep(interval)
-
-        suggestions = self._collect_fuzzy_suggestions(query)
-        snap = None
-        try:
-            snap = self.snapshot(format="compact", max_tokens=1500)
-        except Exception:
-            pass
-        raise ElementNotFoundError(
-            target=query,
-            tab_id=self.id,
-            url=getattr(self, "url", ""),
-            suggestions=suggestions,
-            auto_snapshot=snap,
+        return DomCompiler.poll_find_element(
+            tab=self,
+            finder_func=finder_func,
+            query=query,
+            handle_factory=ElementHandle,
+            timeout=timeout,
+            interval=interval,
         )
-
 
     def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a visible DOM element by inner text or accessible content with dynamic micro-wait."""
-        js = DomBatchSynthesizer.compile_text_finder_js(text, exact=exact)
+        js = DomCompiler.compile_text_finder_js(text, exact=exact)
         return self._poll_find(lambda: self.eval_js(js), text, timeout=timeout)
 
     def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
         """Find an input, textarea, or select element by placeholder, label, or name with micro-wait."""
-        js = DomBatchSynthesizer.compile_input_finder_js(placeholder_or_label)
+        js = DomCompiler.compile_input_finder_js(placeholder_or_label)
         return self._poll_find(lambda: self.eval_js(js), placeholder_or_label, timeout=timeout)
 
     def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a button, submit input, or clickable role by visible name with micro-wait."""
-        js = DomBatchSynthesizer.compile_button_finder_js(name, exact=exact)
+        js = DomCompiler.compile_button_finder_js(name, exact=exact)
         return self._poll_find(lambda: self.eval_js(js), name, timeout=timeout)
 
     def query_all(self, css_selector: str) -> List[ElementHandle]:
         """Find all matching visible elements by CSS selector and return ElementHandles."""
-        js = DomBatchSynthesizer.compile_query_all_js(css_selector)
+        js = DomCompiler.compile_query_all_js(css_selector)
         res = self.eval_js(js)
         raw_items = res if isinstance(res, list) else (res.get("result") if isinstance(res, dict) and isinstance(res.get("result"), list) else [])
         results: List[ElementHandle] = []
@@ -1895,7 +750,7 @@ class Tab:
             return ElementHandle(tab=self, target=target_str)
 
         if any(target_str.startswith(c) for c in (".", "#", "[", ">", ":")) or " " in target_str:
-            js = DomBatchSynthesizer.compile_find_css_js(target_str)
+            js = DomCompiler.compile_find_css_js(target_str)
             try:
                 return self._poll_find(lambda: self.eval_js(js), target_str, timeout=timeout)
             except ElementNotFoundError:
@@ -1983,7 +838,7 @@ class Tab:
 
     def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
         """Extract structured data rows and attributes across repeated container elements in a single JS pass."""
-        js = DomBatchSynthesizer.compile_extract_items_js(container_selector, fields)
+        js = DomCompiler.compile_extract_items_js(container_selector, fields)
         res = self.eval_js(js)
         if isinstance(res, list):
             return res
@@ -1991,11 +846,11 @@ class Tab:
             return res["result"]
         return []
 
-    _SEARCH_ENGINES: Dict[str, str] = DomBatchSynthesizer.SEARCH_ENGINES
+    _SEARCH_ENGINES: Dict[str, str] = DomCompiler.SEARCH_ENGINES
 
     def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
         """Execute search query via search engine shortcut."""
-        target_url = DomBatchSynthesizer.compile_search_url(query, engine=engine)
+        target_url = DomCompiler.compile_search_url(query, engine=engine)
         if target_url:
             self.safety.allow_origin(target_url)
             host = _extract_hostname(target_url)
@@ -2011,7 +866,6 @@ class Tab:
         tab_id_repr = f"#{tid}" if tid is not None else "#1"
         url = info.get("url") or getattr(self, "url", "") or "about:blank"
         title = info.get("title") or getattr(self, "title", "") or "Chrome"
-
 
         media_summary = "none"
         try:
@@ -2051,7 +905,7 @@ class Chrome(Tab):
         >>> print(chrome.get_text("[#results]"))
     """
 
-    def __init__(self, client: Optional[ChromeSocketClient] = None):
+    def __init__(self, client: Optional[TransportClient] = None):
         super().__init__(tab_id=None, client=client or ChromeSocketClient(), active=True)
         self.safety = global_safety
 
@@ -2082,7 +936,6 @@ class Chrome(Tab):
                 return t
         if tabs:
             return tabs[0]
-        # Fallback tab handle with id=None
         return Tab(tab_id=None, client=self._client, active=True)
 
     def tab(self, tab_id: int) -> Tab:
@@ -2111,5 +964,39 @@ class Chrome(Tab):
 # Default global instance
 chrome = Chrome()
 
-
-
+__all__ = [
+    "Chrome",
+    "Tab",
+    "TabMedia",
+    "ElementHandle",
+    "chrome",
+    "ChromeBridgeError",
+    "SecurityException",
+    "RunawayLoopDetectedError",
+    "BrowserUnavailableError",
+    "ElementNotFoundError",
+    "ActionInterceptionError",
+    "NavigationTimeoutError",
+    "TargetLocator",
+    "normalize_locator",
+    "CRITICAL_DELETION_TERMS",
+    "CRITICAL_DELETION_REGEX",
+    "SSO_ALLOWLIST",
+    "DEFAULT_SOCKET_PATH",
+    "DEFAULT_PORT_FILE",
+    "SOCKET_PATH",
+    "DEFAULT_BROWSER_UNAVAILABLE_MSG",
+    "SecurityGateway",
+    "SafetyController",
+    "ActionTracker",
+    "ChromeBridgeWorkerTelemetry",
+    "wrap_untrusted_data",
+    "defang_telemetry_payload",
+    "global_safety",
+    "TransportClient",
+    "ChromeSocketClient",
+    "DomCompiler",
+    "DomBatchSynthesizer",
+    "resolve_runtime_directory",
+    "auto_bootstrap_environment",
+]
