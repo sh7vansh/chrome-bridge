@@ -34,21 +34,26 @@ API_DOCS = r"""# Chrome Bridge - Python SDK API Reference
 
 The synchronous `chrome` module is pre-injected in all REPL executions.
 
-## 1. Page Orientation & Snapshots
+## 1. Fluent In-Script Element Discovery & Actions (Closed-Loop)
+Locate elements and chain actions in a single turn without requiring prior snapshots:
+- `chrome.find_text("Sign In").click()`
+- `chrome.find_input("Email").type("user@example.com", clear=True)`
+- `chrome.find_button("Submit").click()`
+- `chrome.find("[#14]").hover()` / `chrome.find("#submit-btn").click()`
+- `items = chrome.query_all("ul.results > li")` -> List[ElementHandle]
+- `ElementHandle` methods: `.click()`, `.type(text, clear=False, press_enter=False)`, `.select(val)`, `.hover()`, `.text`, `.get_attribute(name)`, `.eval_js(script)`
+
+## 2. Compound Batch Helpers
+Perform multi-step operations in single-statement expressions:
+- `chrome.fill_form({"Email": "alice@example.com", "Remember": True}, submit="Sign In")`
+- `rows = chrome.extract_items("article.post", {"title": "h2", "link": "a@href", "desc": "p"})`
+- `chrome.search("Python 3.11 release notes", engine="google")` (engines: 'google', 'bing', 'ddg', 'youtube', 'github')
+
+## 3. Page Orientation & Semantic Snapshots
 - `print(chrome.snapshot())`
   Generates a Semantic DOM outline with integer Ref-IDs (`[#1]`, `[#2]`, etc.).
-  Always run this first to discover interactive elements on the page.
 
-## 2. Element Interactions
-All methods accept Ref-IDs (`"[#14]"` or `14`), CSS selectors (`"#submit-btn"`), or accessible names:
-- `chrome.click("[#14]")` or `chrome.click(14)`
-- `chrome.type("[#2]", "search query", clear=True, press_enter=True)`
-- `chrome.select("[#5]", "option_value")`
-- `chrome.hover("[#8]")`
-- `chrome.scroll(x=0, y=500)` or `chrome.scroll(target="[#container]")`
-- `chrome.press_key("Enter")`
-
-## 3. Tabs & Navigation
+## 4. Tabs & Navigation
 - `chrome.tabs` -> List[Tab] handles for all open tabs
 - `chrome.active_tab` -> Current active Tab handle
 - `chrome.get_tab(tab_id)` / `chrome.tab(tab_id)` -> Scoped Tab handle
@@ -59,17 +64,17 @@ All methods accept Ref-IDs (`"[#14]"` or `14`), CSS selectors (`"#submit-btn"`),
 - `tab.activate()` -> Focuses the specified tab
 - `tab.close()` -> Safely closes the specified tab
 
-## 4. Extraction & JavaScript Execution
+## 5. Extraction & JavaScript Execution
 - `text = chrome.get_text("[#3]")` -> Extracted text wrapped in untrusted tags
 - `attr = chrome.get_attribute("[#3]", "href")` -> Value of element attribute
 - `result = chrome.eval_js("document.title")` -> Evaluates JS in page context
 - `data_url = chrome.screenshot()` -> Captures PNG base64 / data URL
 
-## 5. Synchronization & Waiting
+## 6. Synchronization & Waiting
 - `chrome.wait_for("[#10]", timeout=10.0, state="visible")` -> Waits for element ('visible', 'hidden', 'attached')
 - `chrome.wait_for_url(r"github\\.com/settings", timeout=15.0)` -> Waits for regex URL match
 
-## 6. Fast Native Media Control (Zero-DOM)
+## 7. Fast Native Media Control (Zero-DOM)
 Direct control over HTML5 video/audio and MediaSession:
 - `chrome.media.status()` -> Returns dict with playing status, title, artist, duration, currentTime
 - `chrome.media.play()` -> Resume playback
@@ -81,23 +86,40 @@ Direct control over HTML5 video/audio and MediaSession:
 
 WORKFLOW_GUIDE = r"""# Chrome Bridge Automation Workflow & Best Practices
 
-## Recommended Multi-Step Pattern
-Write complete Python subroutines to batch actions into a single round-trip:
+## Single-Turn Closed-Loop Recipes
 
+### Recipe 1: Search & Scrape
 ```python
-# 1. Orientation
-snapshot = chrome.snapshot()
-print(snapshot)
+chrome.search("Python asyncio tutorial", engine="google")
+chrome.wait_for("h3")
+results = chrome.extract_items(".g", {"title": "h3", "url": "a@href"})
+print("Top Results:", results[:5])
+```
 
-# 2. Targeted Actions
-chrome.type("[#search_input]", "Python MCP", press_enter=True)
-chrome.wait_for("[#search_results]", timeout=5.0)
+### Recipe 2: Form Fill & Submit
+```python
+chrome.fill_form({
+    "Full Name": "Alice Smith",
+    "Email": "alice@example.com",
+    "Agree to Terms": True
+}, submit="Register")
+```
 
-# 3. Data Extraction
-titles = chrome.eval_js('''
-    Array.from(document.querySelectorAll('.result-title')).map(el => el.innerText)
-''')
-print("Found titles:", titles)
+### Recipe 3: Table / List Extraction
+```python
+products = chrome.extract_items(
+    "tr.product-row",
+    {"name": ".prod-title", "price": ".price", "link": "a@href"}
+)
+print("Extracted Products:", products)
+```
+
+### Recipe 4: Zero-DOM Media Control
+```python
+status = chrome.media.status()
+print("Media State:", status)
+chrome.media.toggle()
+chrome.media.seek(15.0)
 ```
 
 ## Security & Guardrails
@@ -111,28 +133,35 @@ print("Found titles:", titles)
 TOOL_DESCRIPTION = r"""Execute Python code to control Google Chrome via the pre-injected synchronous `chrome` module.
 Variables, imports, and state persist across calls.
 
-CORE API CHEATSHEET:
-1. Orientation:
-   print(chrome.snapshot())           # Get DOM outline with [#N] Ref-IDs
-2. Interactions (accepts Ref-ID '[#14]', int 14, or CSS selector):
+CLOSED-LOOP & FLUENT API CHEATSHEET:
+1. In-Script Fluent Discovery (Single-turn execution without prior snapshots):
+   chrome.find_text("Sign In").click()
+   chrome.find_input("Email").type("user@example.com", clear=True)
+   chrome.find_button("Submit").click()
+   chrome.find("[#14]").hover()
+   handles = chrome.query_all("ul > li")
+
+2. High-Level Compound Helpers:
+   chrome.fill_form({"Email": "alice@example.com", "Agree": True}, submit="Register")
+   items = chrome.extract_items("article.post", {"title": "h2", "link": "a@href"})
+   chrome.search("query", engine="google") # google, bing, ddg, youtube, github
+
+3. Page Orientation & Snapshots:
+   print(chrome.snapshot())           # Get Semantic DOM outline with [#N] Ref-IDs
+
+4. Targeted Interactions (accepts Ref-ID '[#14]', int 14, or CSS selector):
    chrome.click("[#14]")              # Click element
-   chrome.type("[#2]", "query", clear=True, press_enter=True) # Type text
+   chrome.type("[#2]", "query", clear=True, press_enter=True)
    chrome.select("[#5]", "value")     # Choose dropdown option
    chrome.hover("[#8]")               # Hover over element
    chrome.scroll(x=0, y=500)          # Scroll page or container
-3. Tabs & Navigation:
+
+5. Tabs & Navigation:
    chrome.navigate("https://...")     # Navigate current tab
    chrome.new_tab("https://...")      # Open new tab
    tabs = chrome.tabs                 # List all open tabs
    chrome.active_tab                  # Active Tab handle
-   tab = chrome.get_tab(id)           # Scoped tab handle
-4. Extraction & JavaScript:
-   text = chrome.get_text("[#3]")     # Extract text
-   res = chrome.eval_js("document.title") # Execute JS in page context
-   screenshot = chrome.screenshot()   # Capture base64 screenshot
-5. Synchronization:
-   chrome.wait_for("[#10]", timeout=10.0, state="visible")
-   chrome.wait_for_url(r"github\\.com/pulls", timeout=15.0)
+
 6. Native Media Fast-Paths (Zero-DOM):
    chrome.media.status()              # State of HTML5 video/audio
    chrome.media.toggle()              # Toggle play/pause
@@ -148,18 +177,27 @@ mcp = FastMCP(
         "You have full procedural control over the user's active Google Chrome browser via the 'execute_python' tool.\n\n"
         "ENVIRONMENT CAPABILITIES:\n"
         "- Persistent Python REPL: Variables, imports, helper functions, and state persist across successive calls.\n"
-        "- Injected SDK: The synchronous `chrome` module is pre-injected and ready to use.\n\n"
-        "RECOMMENDED WORKFLOW:\n"
-        "1. Orientation: Always inspect the page with `print(chrome.snapshot())` to obtain the Semantic DOM outline and element Ref-IDs (`[#1]`, `[#2]`).\n"
-        "2. Targeted Actions: Interact polymorphically using Ref-IDs or selectors, e.g. `chrome.click(14)`, `chrome.type('[#2]', 'search query', press_enter=True)`.\n"
-        "3. Multi-Step Subroutines: Write complete loops and workflows (form fills, pagination, data extraction) in a single script for high throughput.\n"
-        "4. Synchronization: Use `chrome.wait_for('[#5]')` and `chrome.wait_for_url(r'...')` to handle dynamic page changes.\n"
-        "5. Self-Healing: If an element is not found, inspect the automatic `[diagnostic_auto_snapshot]` or fuzzy match suggestions in the error payload."
+        "- Injected SDK: The synchronous `chrome` module is pre-injected and ready to use.\n"
+        "- Closed-Loop Execution: Write complete multi-statement scripts combining discovery, actions, and extraction in a single turn.\n\n"
+        "RECIPES & PATTERNS:\n"
+        "1. Search & Scrape:\n"
+        "   chrome.search('query', engine='google')\n"
+        "   chrome.wait_for('h3')\n"
+        "   results = chrome.extract_items('.g', {'title': 'h3', 'url': 'a@href'})\n\n"
+        "2. Form Fill & Submit:\n"
+        "   chrome.fill_form({'Email': 'user@example.com', 'Remember': True}, submit='Sign In')\n\n"
+        "3. In-Script Fluent Actions:\n"
+        "   chrome.find_input('Search').type('Python SDK', press_enter=True)\n"
+        "   chrome.find_button('Filter').click()\n\n"
+        "4. Media Control:\n"
+        "   chrome.media.toggle()\n"
+        "   chrome.media.seek(15.0)\n\n"
+        "5. Self-Healing: If an element is not found, inspect the automatic `[candidate_matches]` or `[diagnostic_auto_snapshot]` in the error payload."
     ),
 )
 
-# Persistent in-memory session engine
-_SESSION = PythonReplSession()
+# Persistent in-memory session engine with auto-ambient header orientation
+_SESSION = PythonReplSession(include_ambient=True)
 
 
 @mcp.tool(
@@ -202,10 +240,10 @@ try:
         return (
             f"You are controlling the user's active Google Chrome browser using Chrome Bridge.\n"
             f"{goal_text}"
-            f"Standard Execution Flow:\n"
-            f"1. Run `print(chrome.snapshot())` via `execute_python` to inspect the page DOM and Ref-IDs.\n"
-            f"2. Perform the required actions (`chrome.click('[#N]')`, `chrome.type('[#N]', '...')`, etc.).\n"
-            f"3. Verify completion and report extracted data to the user.\n\n"
+            f"Standard Closed-Loop Flow:\n"
+            f"1. Write complete multi-statement scripts in `execute_python` (e.g. search, fill_form, find_* chained actions).\n"
+            f"2. Verify results or extract data in the same turn.\n"
+            f"3. Report extracted findings to the user.\n\n"
             f"API Cheatsheet:\n"
             f"{API_DOCS}"
         )
@@ -232,3 +270,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

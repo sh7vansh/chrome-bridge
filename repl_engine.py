@@ -78,31 +78,59 @@ class OutputBudgetFormatter:
         error: Optional[str] = None,
         has_result: bool = False,
         auto_snapshot: Optional[str] = None,
+        candidate_matches: Optional[List[Any]] = None,
+        failing_line: Optional[int] = None,
+        failing_code: Optional[str] = None,
+        ambient_header: Optional[str] = None,
     ) -> str:
         sections: List[str] = []
 
+        # 0. Ambient header banner (if provided)
+        if ambient_header and ambient_header.strip():
+            sections.append(ambient_header.strip())
+
         # 1. Error / Exception
         if error:
-            sections.append(f"[error]\n{self._truncate_string(error, 2000)}")
+            if failing_line is not None and failing_code and not error.startswith("Line "):
+                error_text = f"Line {failing_line}: {failing_code}\n{error}"
+            else:
+                error_text = error
+            sections.append(f"[error]\n{self._truncate_string(error_text, 2000)}")
 
-        # 2. Diagnostic Auto-Snapshot (if present from error recovery)
+        # 2. Candidate Matches (Fuzzy matches on failure)
+        if candidate_matches and len(candidate_matches) > 0:
+            match_lines = []
+            for m in candidate_matches:
+                if isinstance(m, dict):
+                    ref = m.get("ref", "")
+                    if ref and not str(ref).startswith("["):
+                        ref = f"[{ref}]" if str(ref).startswith("#") else f"[#{ref}]"
+                    role = m.get("role", "element")
+                    name = m.get("name", "")
+                    match_lines.append(f"- {ref} ({role} '{name}')")
+                else:
+                    match_lines.append(f"- {m}")
+            sections.append(f"[candidate_matches]\n" + "\n".join(match_lines))
+
+        # 3. Diagnostic Auto-Snapshot (if present from error recovery)
         if auto_snapshot and auto_snapshot.strip():
             snapshot_budget = max(2000, int(self.max_chars * 0.4))
             truncated_snapshot = self._truncate_string(auto_snapshot.strip(), snapshot_budget)
             sections.append(f"[diagnostic_auto_snapshot]\n{truncated_snapshot}")
 
-        # 3. Stderr
-        if stderr and stderr.strip():
-            sections.append(f"[stderr]\n{self._truncate_string(stderr.strip(), 1500)}")
-
-        # 4. Stdout
+        # 4. Stdout or Partial Stdout
         if stdout and stdout.strip():
             stdout_budget = max(2000, int(self.max_chars * 0.4))
             truncated_stdout = self._truncate_string(stdout.strip(), stdout_budget)
-            sections.append(f"[stdout]\n{truncated_stdout}")
+            tag = "[partial_stdout]" if error else "[stdout]"
+            sections.append(f"{tag}\n{truncated_stdout}")
 
-        # 5. Result value
-        if has_result:
+        # 5. Stderr
+        if stderr and stderr.strip():
+            sections.append(f"[stderr]\n{self._truncate_string(stderr.strip(), 1500)}")
+
+        # 6. Result value (only if no error)
+        if has_result and not error:
             used_chars = sum(len(s) for s in sections)
             remaining_budget = max(200, self.max_chars - used_chars)
             formatted_res = self._serialize_value(
@@ -115,6 +143,9 @@ class OutputBudgetFormatter:
 
         if not sections:
             return "(executed successfully with no output)"
+
+        if len(sections) == 1 and ambient_header and sections[0] == ambient_header.strip():
+            return f"{ambient_header.strip()}\n\n(executed successfully with no output)"
 
         raw_output = "\n\n".join(sections)
         return defang_telemetry_payload(raw_output)
@@ -208,9 +239,15 @@ class OutputBudgetFormatter:
 class PythonReplSession:
     """Stateful, in-memory Python REPL session that persists globals across executions."""
 
-    def __init__(self, globals_dict: Optional[Dict[str, Any]] = None, formatter: Optional[OutputBudgetFormatter] = None):
+    def __init__(
+        self,
+        globals_dict: Optional[Dict[str, Any]] = None,
+        formatter: Optional[OutputBudgetFormatter] = None,
+        include_ambient: bool = False,
+    ):
         from chrome_sdk import chrome as default_chrome
         self.formatter = formatter or OutputBudgetFormatter()
+        self.include_ambient = include_ambient
         self._globals: Dict[str, Any] = {
             "__name__": "__main__",
             "__doc__": None,
@@ -233,6 +270,10 @@ class PythonReplSession:
         has_result = False
         error_msg = None
         auto_snapshot = None
+        failing_line = None
+        failing_code = None
+        candidate_matches = None
+        ambient_header = None
 
         try:
             tree = ast.parse(code_str, filename="<repl>", mode="exec")
@@ -278,12 +319,36 @@ class PythonReplSession:
         except BaseException as e:
             error_msg = self._format_exception_message(e)
             stderr_buf.write(self._sanitize_traceback(e))
+
+            # Extract failing line number and snippet from <repl>
+            if e.__traceback__:
+                for frame in traceback.extract_tb(e.__traceback__):
+                    if frame.filename == "<repl>" and frame.lineno is not None:
+                        failing_line = frame.lineno
+                        lines = code_str.splitlines()
+                        if 1 <= failing_line <= len(lines):
+                            failing_code = lines[failing_line - 1].strip()
+                        break
+
+            # Check for candidate suggestions
+            if hasattr(e, "suggestions") and getattr(e, "suggestions"):
+                candidate_matches = getattr(e, "suggestions")
+
             # Check for auto-snapshot attribute on exception or session
             if hasattr(e, "auto_snapshot") and getattr(e, "auto_snapshot"):
                 auto_snapshot = getattr(e, "auto_snapshot")
             elif isinstance(e, ChromeBridgeError) and "chrome" in self._globals and hasattr(self._globals["chrome"], "snapshot"):
                 try:
                     auto_snapshot = self._globals["chrome"].snapshot()
+                except Exception:
+                    pass
+
+        # Retrieve ambient state header if enabled
+        if self.include_ambient:
+            chrome_inst = self._globals.get("chrome")
+            if chrome_inst and hasattr(chrome_inst, "get_ambient_header"):
+                try:
+                    ambient_header = chrome_inst.get_ambient_header()
                 except Exception:
                     pass
 
@@ -294,6 +359,10 @@ class PythonReplSession:
             error=error_msg,
             has_result=has_result,
             auto_snapshot=auto_snapshot,
+            candidate_matches=candidate_matches,
+            failing_line=failing_line,
+            failing_code=failing_code,
+            ambient_header=ambient_header,
         )
 
     def _format_exception_message(self, exc: BaseException) -> str:

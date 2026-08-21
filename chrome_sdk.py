@@ -892,6 +892,139 @@ class TabMedia:
         return self._tab.eval_js(js) or {}
 
 
+_DISCOVERY_HELPER_JS = """
+function __cb_is_visible(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) return false;
+    if (typeof el.checkVisibility === 'function') {
+        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+            if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
+            return false;
+        }
+    }
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) < 0.05) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+        if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) return true;
+        return false;
+    }
+    return true;
+}
+
+function __cb_tag(el) {
+    if (!el) return null;
+    if (!window.__cb_handle_counter) window.__cb_handle_counter = 0;
+    let bridgeId = el.getAttribute('data-cbridge-id');
+    if (!bridgeId) {
+        bridgeId = 'cb_' + (++window.__cb_handle_counter) + '_' + Date.now().toString(36);
+        el.setAttribute('data-cbridge-id', bridgeId);
+    }
+    const text = (el.innerText || el.textContent || el.value || '').trim();
+    const role = el.getAttribute('role') || el.tagName.toLowerCase();
+    return {
+        selector: '[data-cbridge-id="' + bridgeId + '"]',
+        tagName: el.tagName.toLowerCase(),
+        role: role,
+        text: text.slice(0, 100),
+        id: el.id || '',
+        name: el.getAttribute('name') || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        value: el.value || ''
+    };
+}
+"""
+
+
+class ElementHandle:
+    """Handle to a resolved DOM element allowing fluent chained interactions.
+
+    Provides chained methods (.click(), .type(), .select(), .hover())
+    with built-in dynamic micro-waits for closed-loop execution without prior snapshots.
+
+    Example:
+        >>> chrome.find_input("Email").type("alice@example.com")
+        >>> chrome.find_button("Sign In").click()
+        >>> chrome.find_text("Dashboard").hover()
+    """
+
+    def __init__(
+        self,
+        tab: "Tab",
+        target: TargetLocator,
+        tag_name: str = "",
+        role: str = "",
+        text: str = "",
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        self._tab = tab
+        self.target = target
+        self._tag_name = tag_name
+        self._role = role
+        self._cached_text = text
+        self._attributes = attributes or {}
+
+    def __repr__(self) -> str:
+        target_repr = str(self.target)
+        role_repr = f" role='{self._role}'" if self._role else ""
+        text_repr = f" text='{self._cached_text[:30]}'" if self._cached_text else ""
+        return f"<ElementHandle target={target_repr}{role_repr}{text_repr}>"
+
+    @property
+    def tab(self) -> "Tab":
+        """Tab instance this element belongs to."""
+        return self._tab
+
+    @property
+    def locator(self) -> TargetLocator:
+        """Target locator for this element."""
+        return self.target
+
+    @property
+    def text(self) -> str:
+        """Extract live text content of the element."""
+        return self._tab.get_text(self.target, wrap=False)
+
+    def click(self, button: str = "left", count: int = 1, safety_check: bool = True) -> "ElementHandle":
+        """Click the element. Returns self for chaining."""
+        self._tab.click(self.target, button=button, count=count, safety_check=safety_check)
+        return self
+
+    def type(
+        self,
+        text: str,
+        clear: bool = False,
+        press_enter: bool = False,
+        safety_check: bool = True,
+    ) -> "ElementHandle":
+        """Type text into the element. Returns self for chaining."""
+        self._tab.type(self.target, text=text, clear=clear, press_enter=press_enter, safety_check=safety_check)
+        return self
+
+    def select(self, value: str, safety_check: bool = True) -> "ElementHandle":
+        """Select option in a <select> dropdown. Returns self for chaining."""
+        self._tab.select(self.target, value=value, safety_check=safety_check)
+        return self
+
+    def hover(self) -> "ElementHandle":
+        """Hover mouse over the element. Returns self for chaining."""
+        self._tab.hover(self.target)
+        return self
+
+    def scroll_into_view(self) -> "ElementHandle":
+        """Scroll the element into viewport view. Returns self for chaining."""
+        self.eval_js("this.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'})")
+        return self
+
+    def get_attribute(self, name: str) -> Optional[str]:
+        """Retrieve element DOM attribute."""
+        return self._tab.get_attribute(self.target, name)
+
+    def eval_js(self, script: str) -> Any:
+        """Execute JavaScript with `this` bound to this element."""
+        return self._tab.eval_js(script, target=self.target)
+
+
 class Tab:
     """Scoped browser tab handle and procedural action context.
 
@@ -1329,6 +1462,16 @@ class Tab:
             "==================================\n"
             "  DOM Orientation:\n"
             "    chrome.snapshot(compact=True)     -> Outline with [#N] Ref-IDs\n\n"
+            "  Fluent In-Script Discovery (Chained Actions without prior snapshot):\n"
+            "    chrome.find(target)               -> ElementHandle\n"
+            "    chrome.find_text('Text')          -> .click(), .type(), .hover()\n"
+            "    chrome.find_input('Placeholder')  -> .type('value', clear=True)\n"
+            "    chrome.find_button('Submit')      -> .click()\n"
+            "    chrome.query_all('css_selector')  -> List[ElementHandle]\n\n"
+            "  Compound Batch Helpers:\n"
+            "    chrome.fill_form({'Email': '...'}, submit='Sign In')\n"
+            "    chrome.extract_items('article', {'title': 'h2', 'link': 'a@href'})\n"
+            "    chrome.search('query', engine='google')\n\n"
             "  Element Interactions (Target: [#N], int N, or 'css_selector'):\n"
             "    chrome.click(target, button='left', count=1)\n"
             "    chrome.type(target, 'text', clear=True, press_enter=False)\n"
@@ -1352,6 +1495,461 @@ class Tab:
             "    chrome.safety.allow_origin('api.example.com')\n"
             "    with chrome.safety.permit_destructive(): ...\n"
         )
+
+    def _collect_fuzzy_suggestions(self, query: str) -> List[Dict[str, Any]]:
+        import json
+        try:
+            js = f"""
+            (() => {{
+                const query = {json.dumps(query)}.toLowerCase();
+                const all = document.querySelectorAll('button, a, input, select, textarea, [role]');
+                const suggestions = [];
+                for (const el of all) {{
+                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
+                    if (tLower.includes(query) || query.includes(tLower) || tLower.slice(0, 3) === query.slice(0, 3)) {{
+                        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                        let ref = el.getAttribute('data-cbridge-id') || el.id || '';
+                        suggestions.push({{
+                            'ref': ref ? '#' + ref : '#element',
+                            'role': role,
+                            'name': txt.slice(0, 50)
+                        }});
+                        if (suggestions.length >= 5) break;
+                    }}
+                }}
+                return suggestions;
+            }})()
+            """
+            res = self.eval_js(js)
+            if isinstance(res, list):
+                return res
+            elif isinstance(res, dict) and isinstance(res.get("result"), list):
+                return res["result"]
+        except Exception:
+            pass
+        return []
+
+    def _poll_find(self, finder_func, query: str, timeout: float = 1.5) -> ElementHandle:
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            try:
+                info = finder_func()
+                if isinstance(info, dict) and "result" in info and isinstance(info["result"], dict):
+                    info = info["result"]
+                if isinstance(info, dict) and (info.get("selector") or info.get("target")):
+                    return ElementHandle(
+                        tab=self,
+                        target=info.get("selector") or info.get("target"),
+                        tag_name=info.get("tagName", ""),
+                        role=info.get("role", ""),
+                        text=info.get("text", ""),
+                    )
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                break
+            time.sleep(0.05)
+
+        suggestions = self._collect_fuzzy_suggestions(query)
+        raise ElementNotFoundError(target=query, tab_id=self.id, url=self.url, suggestions=suggestions)
+
+    def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
+        """Find a visible DOM element by inner text or accessible content with dynamic micro-wait."""
+        import json
+        def _find():
+            js = f"""
+            (() => {{
+                {_DISCOVERY_HELPER_JS}
+                const query = {json.dumps(text)};
+                const exact = {json.dumps(exact)};
+                const qLower = query.toLowerCase();
+
+                const candidates = [];
+                const all = document.querySelectorAll('button, a, input, [role], p, span, h1, h2, h3, h4, h5, h6, li, td, th, label, div');
+                for (const el of all) {{
+                    if (!__cb_is_visible(el)) continue;
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
+                    
+                    let match = false;
+                    let score = 0;
+                    if (exact) {{
+                        if (tLower === qLower) {{ match = true; score = 100; }}
+                    }} else {{
+                        if (tLower === qLower) {{ match = true; score = 100; }}
+                        else if (tLower.includes(qLower)) {{ match = true; score = 50 + Math.max(0, 40 - (txt.length - query.length)); }}
+                    }}
+
+                    if (match) {{
+                        const isInteractive = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL'].includes(el.tagName) || el.hasAttribute('role');
+                        if (isInteractive) score += 30;
+                        score -= Math.min(20, el.children.length * 5);
+                        candidates.push({{ el, score }});
+                    }}
+                }}
+
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }})()
+            """
+            return self.eval_js(js)
+
+        return self._poll_find(_find, text, timeout=timeout)
+
+    def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
+        """Find an input, textarea, or select element by placeholder, label, or name with micro-wait."""
+        import json
+        def _find():
+            js = f"""
+            (() => {{
+                {_DISCOVERY_HELPER_JS}
+                const query = {json.dumps(placeholder_or_label)};
+                const qLower = query.toLowerCase();
+
+                const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+                const candidates = [];
+
+                for (const el of inputs) {{
+                    if (!__cb_is_visible(el)) continue;
+                    let score = 0;
+
+                    const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
+                    if (placeholder === qLower) score = 100;
+                    else if (placeholder.includes(qLower)) score = 80;
+
+                    const ariaLabel = (el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '').trim().toLowerCase();
+                    if (ariaLabel === qLower) score = Math.max(score, 95);
+                    else if (ariaLabel.includes(qLower)) score = Math.max(score, 75);
+
+                    const name = (el.getAttribute('name') || '').trim().toLowerCase();
+                    const id = (el.id || '').trim().toLowerCase();
+                    if (name === qLower || id === qLower) score = Math.max(score, 90);
+                    else if (name.includes(qLower) || id.includes(qLower)) score = Math.max(score, 70);
+
+                    if (el.id) {{
+                        try {{
+                            const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                            if (labelEl) {{
+                                const lText = labelEl.innerText.trim().toLowerCase();
+                                if (lText === qLower) score = Math.max(score, 95);
+                                else if (lText.includes(qLower)) score = Math.max(score, 75);
+                            }}
+                        }} catch (e) {{}}
+                    }}
+                    const parentLabel = el.closest('label');
+                    if (parentLabel) {{
+                        const lText = parentLabel.innerText.trim().toLowerCase();
+                        if (lText === qLower) score = Math.max(score, 90);
+                        else if (lText.includes(qLower)) score = Math.max(score, 70);
+                    }}
+
+                    if (score > 0) {{
+                        candidates.push({{ el, score }});
+                    }}
+                }}
+
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }})()
+            """
+            return self.eval_js(js)
+
+        return self._poll_find(_find, placeholder_or_label, timeout=timeout)
+
+    def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
+        """Find a button, submit input, or clickable role by visible name with micro-wait."""
+        import json
+        def _find():
+            js = f"""
+            (() => {{
+                {_DISCOVERY_HELPER_JS}
+                const query = {json.dumps(name)};
+                const exact = {json.dumps(exact)};
+                const qLower = query.toLowerCase();
+
+                const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], a.btn, a.button, a[role="button"], summary, a');
+                const candidates = [];
+
+                for (const el of buttons) {{
+                    if (!__cb_is_visible(el)) continue;
+                    const txt = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+                    if (!txt) continue;
+                    const tLower = txt.toLowerCase();
+
+                    let score = 0;
+                    if (exact) {{
+                        if (tLower === qLower) score = 100;
+                    }} else {{
+                        if (tLower === qLower) score = 100;
+                        else if (tLower.includes(qLower)) score = 50 + Math.max(0, 40 - (txt.length - query.length));
+                    }}
+
+                    if (score > 0) {{
+                        if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && el.type === 'submit')) score += 20;
+                        candidates.push({{ el, score }});
+                    }}
+                }}
+
+                if (candidates.length === 0) return null;
+                candidates.sort((a, b) => b.score - a.score);
+                return __cb_tag(candidates[0].el);
+            }})()
+            """
+            return self.eval_js(js)
+
+        return self._poll_find(_find, name, timeout=timeout)
+
+    def query_all(self, css_selector: str) -> List[ElementHandle]:
+        """Find all matching visible elements by CSS selector and return ElementHandles."""
+        import json
+        js = f"""
+        (() => {{
+            {_DISCOVERY_HELPER_JS}
+            const selector = {json.dumps(css_selector)};
+            const all = document.querySelectorAll(selector);
+            const results = [];
+            for (const el of all) {{
+                if (__cb_is_visible(el)) {{
+                    const tagged = __cb_tag(el);
+                    if (tagged) results.push(tagged);
+                }}
+            }}
+            return results;
+        }})()
+        """
+        res = self.eval_js(js)
+        if isinstance(res, list):
+            return [
+                ElementHandle(
+                    tab=self,
+                    target=item.get("selector") or item.get("target"),
+                    tag_name=item.get("tagName", ""),
+                    role=item.get("role", ""),
+                    text=item.get("text", ""),
+                )
+                for item in res
+                if isinstance(item, dict)
+            ]
+        elif isinstance(res, dict) and isinstance(res.get("result"), list):
+            return [
+                ElementHandle(
+                    tab=self,
+                    target=item.get("selector") or item.get("target"),
+                    tag_name=item.get("tagName", ""),
+                    role=item.get("role", ""),
+                    text=item.get("text", ""),
+                )
+                for item in res["result"]
+                if isinstance(item, dict)
+            ]
+        return []
+
+    def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
+        """Polymorphically find an element by Ref-ID, CSS selector, button name, input label, or text."""
+        if isinstance(target, int):
+            return ElementHandle(tab=self, target=target)
+        target_str = str(target).strip()
+        if target_str.startswith("[#") or (target_str.startswith("#") and target_str[1:].isdigit()):
+            return ElementHandle(tab=self, target=target_str)
+
+        import json
+        if any(target_str.startswith(c) for c in (".", "#", "[", ">", ":")) or " " in target_str:
+            def _find_css():
+                js = f"""
+                (() => {{
+                    {_DISCOVERY_HELPER_JS}
+                    try {{
+                        const el = document.querySelector({json.dumps(target_str)});
+                        if (el && __cb_is_visible(el)) return __cb_tag(el);
+                    }} catch (e) {{}}
+                    return null;
+                }})()
+                """
+                return self.eval_js(js)
+            try:
+                return self._poll_find(_find_css, target_str, timeout=timeout)
+            except ElementNotFoundError:
+                pass
+
+        try:
+            return self.find_button(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+        except ElementNotFoundError:
+            pass
+        try:
+            return self.find_input(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+        except ElementNotFoundError:
+            pass
+        return self.find_text(target_str, timeout=timeout / 3.0 if timeout else 0.5)
+
+    def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
+        """Fill multiple form inputs, textareas, selects, and checkboxes in a compound batch."""
+        filled_count = 0
+        for field_key, value in mapping.items():
+            handle: Optional[ElementHandle] = None
+            key_str = str(field_key).strip()
+
+            if key_str.startswith("[#") or key_str.startswith("#") or key_str.startswith(".") or key_str.startswith("input"):
+                try:
+                    handle = self.find(key_str, timeout=1.0)
+                except Exception:
+                    handle = None
+
+            if handle is None:
+                try:
+                    handle = self.find_input(key_str, timeout=1.0)
+                except Exception:
+                    pass
+
+            if handle is None:
+                try:
+                    handle = self.find(key_str, timeout=1.0)
+                except Exception:
+                    pass
+
+            if handle is None:
+                raise ElementNotFoundError(target=key_str, tab_id=self.id, url=self.url)
+
+            if isinstance(value, bool):
+                try:
+                    is_checked = handle.eval_js("!!this.checked")
+                except Exception:
+                    is_checked = False
+                if bool(is_checked) != value:
+                    handle.click()
+            elif isinstance(value, list) or handle._tag_name == "select" or handle._role == "combobox":
+                handle.select(str(value[0] if isinstance(value, list) else value))
+            else:
+                handle.type(str(value), clear=True)
+            filled_count += 1
+
+        submitted = False
+        if submit:
+            if submit is True or str(submit).lower() == "enter":
+                try:
+                    self.press_key("Enter")
+                    submitted = True
+                except Exception:
+                    pass
+            else:
+                submit_str = str(submit).strip()
+                submit_handle = None
+                if submit_str.startswith("[#") or submit_str.startswith("#") or submit_str.startswith("."):
+                    submit_handle = self.find(submit_str, timeout=1.0)
+                else:
+                    submit_handle = self.find_button(submit_str, timeout=1.0)
+                if submit_handle:
+                    submit_handle.click()
+                    submitted = True
+
+        return {"success": True, "filled": filled_count, "submitted": submitted}
+
+    def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
+        """Extract structured data rows and attributes across repeated container elements in a single JS pass."""
+        import json
+        js = f"""
+        (() => {{
+            const containerSelector = {json.dumps(container_selector)};
+            const fields = {json.dumps(fields)};
+            const containers = Array.from(document.querySelectorAll(containerSelector));
+            const results = [];
+
+            for (const container of containers) {{
+                const row = {{}};
+                for (const [key, fieldSel] of Object.entries(fields)) {{
+                    let targetEl = container;
+                    let attrName = null;
+                    let sel = (fieldSel || '').trim();
+
+                    if (sel.includes('@')) {{
+                        const parts = sel.split('@');
+                        const subSel = parts[0].trim();
+                        attrName = parts[1].trim();
+                        if (subSel && subSel !== '.' && subSel !== 'self') {{
+                            targetEl = container.querySelector(subSel);
+                        }}
+                    }} else if (sel && sel !== '.' && sel !== 'self') {{
+                        targetEl = container.querySelector(sel);
+                    }}
+
+                    if (!targetEl) {{
+                        row[key] = "";
+                    }} else if (attrName) {{
+                        row[key] = (targetEl.getAttribute(attrName) || targetEl[attrName] || "").toString().trim();
+                    }} else {{
+                        row[key] = (targetEl.innerText || targetEl.textContent || "").trim();
+                    }}
+                }}
+                results.push(row);
+            }}
+            return results;
+        }})()
+        """
+        res = self.eval_js(js)
+        if isinstance(res, list):
+            return res
+        elif isinstance(res, dict) and "result" in res and isinstance(res["result"], list):
+            return res["result"]
+        return []
+
+    def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
+        """Execute search query via search engine shortcut."""
+        import urllib.parse
+        q_enc = urllib.parse.quote_plus(query)
+        eng_lower = engine.lower().strip()
+        if eng_lower in ("google", "g"):
+            target_url = f"https://www.google.com/search?q={q_enc}"
+        elif eng_lower in ("bing", "b"):
+            target_url = f"https://www.bing.com/search?q={q_enc}"
+        elif eng_lower in ("duckduckgo", "ddg"):
+            target_url = f"https://duckduckgo.com/?q={q_enc}"
+        elif eng_lower in ("youtube", "yt"):
+            target_url = f"https://www.youtube.com/results?search_query={q_enc}"
+        elif eng_lower in ("github", "gh"):
+            target_url = f"https://github.com/search?q={q_enc}"
+        elif "{query}" in engine:
+            target_url = engine.replace("{query}", q_enc)
+        elif engine.startswith("http://") or engine.startswith("https://"):
+            target_url = f"{engine}?q={q_enc}" if "?" not in engine else f"{engine}&q={q_enc}"
+        else:
+            target_url = f"https://www.google.com/search?q={q_enc}"
+
+        if target_url:
+            self.safety.allow_origin(target_url)
+            host = _extract_hostname(target_url)
+            if host:
+                self.allowed_origins.add(host)
+
+        return self.navigate(target_url)
+
+    def get_ambient_header(self) -> str:
+        """Generate standardized ambient orientation header for this tab."""
+        tab_id_repr = f"#{self.id}" if self.id is not None else "#1"
+        info = self.info if hasattr(self, "info") else {}
+        url = info.get("url") or getattr(self, "url", "") or "about:blank"
+        title = info.get("title") or getattr(self, "title", "") or "Chrome"
+
+        media_summary = "none"
+        try:
+            if hasattr(self, "media"):
+                m_stat = self.media.status()
+                if isinstance(m_stat, dict) and m_stat.get("found"):
+                    p_state = m_stat.get("playbackState") or ("paused" if m_stat.get("paused") else "playing")
+                    m_title = m_stat.get("title")
+                    if m_title and p_state in ("playing", "paused"):
+                        media_summary = f"{p_state} ('{m_title}')"
+                    else:
+                        media_summary = str(p_state)
+                elif isinstance(m_stat, dict) and m_stat.get("playbackState") and m_stat.get("playbackState") != "none":
+                    media_summary = str(m_stat.get("playbackState"))
+        except Exception:
+            pass
+
+        return f"[Active Tab: {tab_id_repr} | URL: {url} | Title: {title} | Media: {media_summary}]"
 
 
 class Chrome(Tab):
@@ -1429,7 +2027,49 @@ class Chrome(Tab):
         """Check browser connection status."""
         return self._client.call("ping")
 
+    def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
+        """Polymorphically find element on active tab."""
+        return self.active_tab.find(target, timeout=timeout)
+
+    def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
+        """Find visible element by text on active tab."""
+        return self.active_tab.find_text(text, exact=exact, timeout=timeout)
+
+    def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
+        """Find input/textarea/select by placeholder or label on active tab."""
+        return self.active_tab.find_input(placeholder_or_label, timeout=timeout)
+
+    def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
+        """Find button by visible text on active tab."""
+        return self.active_tab.find_button(name, exact=exact, timeout=timeout)
+
+    def query_all(self, css_selector: str) -> List[ElementHandle]:
+        """Find all matching elements by CSS selector on active tab."""
+        return self.active_tab.query_all(css_selector)
+
+    def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
+        """Fill multiple form inputs and optionally submit on active tab."""
+        return self.active_tab.fill_form(mapping, submit=submit)
+
+    def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
+        """Extract structured items from repeated containers on active tab."""
+        return self.active_tab.extract_items(container_selector, fields)
+
+    def search(self, query: str, engine: str = "google") -> Dict[str, Any]:
+        """Execute search query shortcut on active tab."""
+        return self.active_tab.search(query, engine=engine)
+
+    def get_ambient_header(self) -> str:
+        """Generate ambient orientation header for active tab."""
+        try:
+            return self.active_tab.get_ambient_header()
+        except Exception:
+            url = getattr(self, "url", "") or "about:blank"
+            title = getattr(self, "title", "") or "Chrome"
+            return f"[Active Tab: #1 | URL: {url} | Title: {title} | Media: none]"
+
 
 # Default global instance
 chrome = Chrome()
+
 
