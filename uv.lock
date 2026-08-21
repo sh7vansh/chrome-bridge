@@ -19,7 +19,7 @@ wheels = [
 
 [[package]]
 name = "antigravity-chrome-bridge"
-version = "2.0.26"
+version = "2.0.28"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
