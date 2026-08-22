@@ -151,7 +151,7 @@ For an MCP-compatible client that requires manual configuration:
 ## Remote Use
 
 Chrome Bridge can also be exposed to an MCP client running on another machine
-through `mcp-proxy`.
+through its built-in SSE server.
 
 > **⚠️ Security warning:** This exposes the Chrome Bridge MCP endpoint over the
 > network. Anyone who can reach the configured port may be able to control your
@@ -159,16 +159,10 @@ through `mcp-proxy`.
 > behind appropriate network access controls. Do **not** expose the endpoint
 > directly to the public internet.
 
-Install `mcp-proxy`:
+Start a stateless network endpoint for Chrome Bridge using the Streamable HTTP transport:
 
 ```bash
-uv tool install "mcp<2.0.0"
-```
-
-Then start a network endpoint for Chrome Bridge:
-
-```bash
-uvx --with "mcp<2.0.0" mcp-proxy --host 0.0.0.0 --port 8787 --stateless uvx antigravity-chrome-bridge mcp
+uvx antigravity-chrome-bridge mcp --transport streamable-http --stateless --host 0.0.0.0 --port 8787
 ```
 
 The Chrome Bridge MCP endpoint is available at:
