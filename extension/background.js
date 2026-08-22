@@ -304,17 +304,22 @@ async function handleAction(action, params) {
 
           const listener = async (updatedTabId, info, tab) => {
             if (updatedTabId === targetId && info.status === 'complete') {
+              // Ignore initial placeholder complete events when creating a new tab
+              if (url !== 'about:blank' && !url.startsWith('chrome://')) {
+                if (tab.url === 'about:blank' || tab.url.startsWith('chrome://')) return;
+              }
+              
               chrome.tabs.onUpdated.removeListener(listener);
               try {
                 const scriptRes = await chrome.scripting.executeScript({
                   target: { tabId: targetId },
-                  func: () => {
+                  func: (registryTitle) => {
                     return new Promise(res => {
-                      if (document.title && document.title !== 'New Tab' && document.title !== 'about:blank') {
+                      if (document.title && document.title !== 'New Tab' && document.title !== 'about:blank' && document.title !== registryTitle) {
                         return res(document.title);
                       }
                       const observer = new MutationObserver(() => {
-                        if (document.title && document.title !== 'New Tab') {
+                        if (document.title && document.title !== 'New Tab' && document.title !== registryTitle) {
                           observer.disconnect();
                           res(document.title);
                         }
@@ -324,13 +329,14 @@ async function handleAction(action, params) {
                       else observer.observe(document.head || document.documentElement, { childList: true, subtree: true });
                       setTimeout(() => { observer.disconnect(); res(document.title); }, 2500);
                     });
-                  }
+                  },
+                  args: [tab.title]
                 });
                 const liveTitle = scriptRes && scriptRes[0] ? scriptRes[0].result : tab.title;
                 globalTitleCache.set(targetId, liveTitle);
                 resolve({ tabId: tab.id, url: tab.url, title: liveTitle });
               } catch (err) {
-                resolve({ tabId: tab.id, url: tab.url, title: tab.title });
+                resolve({ tabId: tab.id, url: tab.url, title: tab.title, __debug: err.message });
               }
             }
           };

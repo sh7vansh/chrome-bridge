@@ -364,21 +364,41 @@ class Tab:
             
         self.id = tab_id
         self._client = engine
-        self.title = title
-        self.url = url
-        self.active = active
+        self._cached_title = title
+        self._cached_url = url
+        self._cached_active = active
         self.safety = global_safety
         self._media_controller: Optional[TabMedia] = None
         self.allowed_origins: Set[str] = set()
-        if self.url:
-            host = _extract_hostname(self.url)
+        if self._cached_url:
+            host = _extract_hostname(self._cached_url)
             if host:
                 self.allowed_origins.add(host)
-        self.safety = global_safety
 
     def __repr__(self) -> str:
         tab_id_repr = self.id if self.id is not None else "active"
         return f'<Tab id={tab_id_repr} title="{self.title}" url="{self.url}" active={self.active}>'
+
+    @property
+    def title(self) -> str:
+        """Dynamically fetch the live title."""
+        info = self.info
+        self._cached_title = info.get("title", self._cached_title)
+        return self._cached_title
+
+    @property
+    def url(self) -> str:
+        """Dynamically fetch the live URL."""
+        info = self.info
+        self._cached_url = info.get("url", self._cached_url)
+        return self._cached_url
+
+    @property
+    def active(self) -> bool:
+        """Dynamically fetch active state."""
+        info = self.info
+        self._cached_active = info.get("active", self._cached_active)
+        return self._cached_active
 
     @property
     def origin(self) -> str:
@@ -399,16 +419,16 @@ class Tab:
         tabs = self._client.call("list_tabs")
         for t in tabs:
             if self.id is not None and t.get("id") == self.id:
-                self.title = t.get("title", "")
-                self.url = t.get("url", "")
-                self.active = t.get("active", False)
+                self._cached_title = t.get("title", "")
+                self._cached_url = t.get("url", "")
+                self._cached_active = t.get("active", False)
                 return t
             elif self.id is None and t.get("active", False):
-                self.title = t.get("title", "")
-                self.url = t.get("url", "")
-                self.active = True
+                self._cached_title = t.get("title", "")
+                self._cached_url = t.get("url", "")
+                self._cached_active = True
                 return t
-        return {"id": self.id, "title": self.title, "url": self.url, "active": self.active}
+        return {"id": self.id, "title": self._cached_title, "url": self._cached_url, "active": self._cached_active}
 
     @property
     def media(self) -> TabMedia:
@@ -453,9 +473,12 @@ class Tab:
             pass
 
         res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
-        self.url = res.get("url", url) if isinstance(res, dict) else url
-        if isinstance(res, dict) and res.get("title"):
-            self.title = res.get("title")
+        self._cached_url = res.get("url", url) if isinstance(res, dict) else url
+        if isinstance(res, dict):
+            if res.get("__debug"):
+                print(f"[Chrome Bridge SDK Warning] Navigation title extraction failed: {res.get('__debug')}")
+            if res.get("title"):
+                self._cached_title = res.get("title")
         target_host = _extract_hostname(url)
         if target_host:
             self.allowed_origins.add(target_host)
@@ -851,10 +874,12 @@ class Chrome(Tab):
         """Get a scoped Tab handle by integer ID (alias for tab(tab_id))."""
         return self.tab(tab_id)
 
-    def new_tab(self, url: str = "about:blank") -> Tab:
-        """Create and return a new browser tab."""
+    def new_tab(self, url: str = "about:blank") -> "Tab":
+        """Open a new tab and return its handle."""
         res = self._client.call("navigate", {"url": url, "newTab": True})
-        return Tab(tab_id=res.get("tabId"), client=self._client, url=res.get("url", url), active=True)
+        if isinstance(res, dict) and res.get("__debug"):
+            print(f"[Chrome Bridge SDK Warning] New tab title extraction failed: {res.get('__debug')}")
+        return Tab(tab_id=res.get("tabId"), client=self._client, title=res.get("title", ""), url=res.get("url", url), active=True)
 
     def ping(self) -> Dict[str, Any]:
         """Ping the active browser session."""
