@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "antigravity-chrome-bridge"
-version = "2.1.1"
+version = "2.1.2"
 description = "Persistent Python REPL Runtime and Native Messaging Bridge for Google Chrome"
 readme = "README.md"
 requires-python = ">=3.10"
