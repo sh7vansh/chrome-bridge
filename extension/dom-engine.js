@@ -5,7 +5,7 @@
  * Element Ref-ID indexing, fuzzy locator matching, and hit-testing verification.
  */
 
-export function inPageDOMOperation(payload) {
+export async function inPageDOMOperation(payload) {
   const { operation, args } = payload;
 
   const INTERACTIVE_ROLES = new Set([
@@ -556,6 +556,8 @@ export function inPageDOMOperation(payload) {
           observer.observe(targetNode, { childList: true, subtree: false });
         }
       } catch {}
+    });
+  }
 
   function tagElement(el) {
     if (!el) return null;
@@ -819,18 +821,19 @@ export function inPageDOMOperation(payload) {
       }
 
       const finder = getFinder();
-      const res = await waitForElement(finder, timeout, String(query));
-      if (!res) {
-        return {
-          __error: {
-            code: 'ELEMENT_NOT_FOUND',
-            target: String(query),
-            suggestions: [],
-            url: window.location.href
-          }
-        };
-      }
-      return res;
+      return waitForElement(finder, timeout, String(query)).then(res => {
+        if (!res) {
+          return {
+            __error: {
+              code: 'ELEMENT_NOT_FOUND',
+              target: String(query),
+              suggestions: [],
+              url: window.location.href
+            }
+          };
+        }
+        return res;
+      });
     }
 
     case 'query_elements': {
