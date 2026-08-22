@@ -709,70 +709,16 @@ class Tab:
         return self.find_text(target_str, timeout=_remaining_timeout())
 
     def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
-        """Fill multiple form inputs, textareas, selects, and checkboxes in a compound batch."""
-        filled_count = 0
-        for field_key, value in mapping.items():
-            handle: Optional[ElementHandle] = None
-            key_str = str(field_key).strip()
-
-            if key_str.startswith("[#") or key_str.startswith("#") or key_str.startswith(".") or key_str.startswith("input"):
-                try:
-                    handle = self.find(key_str, timeout=1.0)
-                except Exception:
-                    handle = None
-
-            if handle is None:
-                try:
-                    handle = self.find_input(key_str, timeout=1.0)
-                except Exception:
-                    pass
-
-            if handle is None:
-                try:
-                    handle = self.find(key_str, timeout=1.0)
-                except Exception:
-                    pass
-
-            if handle is None:
-                raise ElementNotFoundError(target=key_str, tab_id=self.id, url=self.url)
-
-            is_radio = handle.is_radio
-
-            if isinstance(value, bool):
-                try:
-                    is_checked = handle.eval_js("!!this.checked || this.getAttribute('aria-checked') === 'true'")
-                except Exception:
-                    is_checked = False
-                if bool(is_checked) != value:
-                    handle.click()
-            elif is_radio:
-                handle.click()
-            elif isinstance(value, list) or handle.tag_name == "select" or handle.role == "combobox":
-                handle.select(str(value[0] if isinstance(value, list) else value))
-            else:
-                handle.type(str(value), clear=True)
-            filled_count += 1
-
-        submitted = False
-        if submit:
-            if submit is True or str(submit).lower() == "enter":
-                try:
-                    self.press_key("Enter")
-                    submitted = True
-                except Exception:
-                    pass
-            else:
-                submit_str = str(submit).strip()
-                submit_handle = None
-                if submit_str.startswith("[#") or submit_str.startswith("#") or submit_str.startswith("."):
-                    submit_handle = self.find(submit_str, timeout=1.0)
-                else:
-                    submit_handle = self.find_button(submit_str, timeout=1.0)
-                if submit_handle:
-                    submit_handle.click()
-                    submitted = True
-
-        return {"success": True, "filled": filled_count, "submitted": submitted}
+        """Fill multiple form inputs, textareas, selects, and checkboxes in a single atomic in-page pass."""
+        action_rpc = DomCompiler.compile_action_rpc("fill_form", mapping=mapping, submit=submit)
+        params = action_rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(action_rpc["action"], params)
+        if isinstance(res, dict) and res.get("errors"):
+            first_err = res["errors"][0]
+            field_name = first_err.get("field", "form_field")
+            raise ElementNotFoundError(target=field_name, tab_id=self.id, url=self.url)
+        return res if isinstance(res, dict) else {"success": True, "filled": len(mapping), "submitted": bool(submit)}
 
     def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
         """Extract structured data rows and attributes across repeated container elements in a single JS pass."""

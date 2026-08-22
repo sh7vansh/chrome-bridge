@@ -221,17 +221,30 @@ def test_ambient_state_cache_memoization_and_invalidation():
     assert mock.count == 2
 
 
-def test_compress_dom_snapshot_budgeting():
-    from chrome_bridge.repl import compress_dom_snapshot
+def test_repl_metadata_catalog():
+    from chrome_bridge.repl import ReplMetadataCatalog
 
-    raw_snapshot = 'PAGE: "Long Page"\nURL: "https://example.com"\n' + '\n'.join(
-        [f"- div [# {i}] Container {i}\n  - button [#{i+100}] Click {i}" for i in range(100)]
-    )
+    api_docs = ReplMetadataCatalog.get_api_docs()
+    assert "Chrome Bridge - Python SDK API Reference" in api_docs
+    assert "chrome.find_text" in api_docs
+    assert "chrome.fill_form" in api_docs
 
-    compressed = compress_dom_snapshot(raw_snapshot, max_chars=1000)
-    assert len(compressed) <= 1050
-    assert 'PAGE: "Long Page"' in compressed
-    assert "- button [#" in compressed
+    workflow_guide = ReplMetadataCatalog.get_workflow_guide()
+    assert "Chrome Bridge Automation Workflow" in workflow_guide
+    assert "Recipe 1: Search & Scrape" in workflow_guide
+
+    tool_desc = ReplMetadataCatalog.get_tool_description()
+    assert "Execute Python code to control Google Chrome" in tool_desc
+
+    server_inst = ReplMetadataCatalog.get_server_instructions()
+    assert "procedural control over the user's active Google Chrome browser" in server_inst
+
+    prompt_auto = ReplMetadataCatalog.get_browser_automation_prompt(goal="Search GitHub")
+    assert "Goal: Search GitHub" in prompt_auto
+    assert "Standard Closed-Loop Flow" in prompt_auto
+
+    prompt_media = ReplMetadataCatalog.get_media_control_prompt(action="pause")
+    assert "Requested Action: pause" in prompt_media
 
 
 

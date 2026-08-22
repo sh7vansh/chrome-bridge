@@ -20,6 +20,7 @@ from chrome_bridge.repl import (
     ExecutionTimeoutContext,
     OutputBudgetFormatter,
     PythonReplSession,
+    ReplMetadataCatalog,
     ReplSessionEngine,
     extract_diagnostic_report,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "ExecutionOutcome",
     "extract_diagnostic_report",
     "OutputBudgetFormatter",
+    "ReplMetadataCatalog",
     "ReplSessionEngine",
     "PythonReplSession",
     "main",

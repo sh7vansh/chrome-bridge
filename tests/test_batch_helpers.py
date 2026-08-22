@@ -6,13 +6,8 @@ from chrome_sdk import Chrome, Tab, ElementHandle
 
 def test_fill_form_standard_fields():
     client = MagicMock()
+    client.call.return_value = {"success": True, "filled": 2, "submitted": False}
     tab = Tab(tab_id=1, client=client)
-    
-    # Mock find_input / find to return element handles
-    tab.find_input = MagicMock(side_effect=lambda name, *args, **kwargs: ElementHandle(tab=tab, target=f"input_{name}"))
-    tab.type = MagicMock()
-    tab.select = MagicMock()
-    tab.press_key = MagicMock()
 
     form_data = {
         "Full Name": "Alice Smith",
@@ -24,34 +19,17 @@ def test_fill_form_standard_fields():
     assert res["filled"] == 2
     assert res["submitted"] is False
 
-    assert tab.find_input.call_count == 2
-    tab.find_input.assert_any_call("Full Name", timeout=1.0)
-    tab.find_input.assert_any_call("Email", timeout=1.0)
+    client.call.assert_called_once_with("fill_form", {
+        "mapping": form_data,
+        "submit": None,
+        "tabId": 1,
+    })
 
 
 def test_fill_form_with_checkbox_and_submit():
     client = MagicMock()
+    client.call.return_value = {"success": True, "filled": 2, "submitted": True}
     tab = Tab(tab_id=1, client=client)
-
-    name_handle = ElementHandle(tab=tab, target="[#1]")
-    name_handle.type = MagicMock()
-
-    agree_handle = ElementHandle(tab=tab, target="[#2]")
-    agree_handle.eval_js = MagicMock(return_value=False)
-    agree_handle.click = MagicMock()
-
-    submit_btn = ElementHandle(tab=tab, target="[#3]")
-    submit_btn.click = MagicMock()
-
-    def mock_find_input(k, *args, **kwargs):
-        if k == "Username":
-            return name_handle
-        elif k == "I agree":
-            return agree_handle
-        return ElementHandle(tab=tab, target=k)
-
-    tab.find_input = MagicMock(side_effect=mock_find_input)
-    tab.find_button = MagicMock(return_value=submit_btn)
 
     res = tab.fill_form(
         {"Username": "bob123", "I agree": True},
@@ -62,28 +40,26 @@ def test_fill_form_with_checkbox_and_submit():
     assert res["filled"] == 2
     assert res["submitted"] is True
 
-    name_handle.type.assert_called_once_with("bob123", clear=True)
-    agree_handle.click.assert_called_once()
-    tab.find_button.assert_called_once_with("Register", timeout=1.0)
-    submit_btn.click.assert_called_once()
+    client.call.assert_called_once_with("fill_form", {
+        "mapping": {"Username": "bob123", "I agree": True},
+        "submit": "Register",
+        "tabId": 1,
+    })
 
 
 def test_fill_form_with_radio_buttons():
     client = MagicMock()
+    client.call.return_value = {"success": True, "filled": 1, "submitted": False}
     tab = Tab(tab_id=1, client=client)
-
-    radio_handle = ElementHandle(tab=tab, target="[#15]", tag_name="input", role="radio")
-    radio_handle.eval_js = MagicMock(return_value={"isRadio": True, "checked": False})
-    radio_handle.click = MagicMock()
-    radio_handle.type = MagicMock()
-
-    tab.find_input = MagicMock(return_value=radio_handle)
 
     res = tab.fill_form({"Delivery Option": "Express Delivery"})
     assert res["success"] is True
     assert res["filled"] == 1
-    radio_handle.click.assert_called_once()
-    radio_handle.type.assert_not_called()
+    client.call.assert_called_once_with("fill_form", {
+        "mapping": {"Delivery Option": "Express Delivery"},
+        "submit": None,
+        "tabId": 1,
+    })
 
 
 def test_extract_items():

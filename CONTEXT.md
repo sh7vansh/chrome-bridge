@@ -102,6 +102,14 @@ _Avoid_: Mock socket, test client, fake transport
 The typed action dispatch seam between the DOM Compiler and the Chrome extension Tab Execution Coordinator transmitting structured JSON parameters rather than raw interpolated JavaScript code strings.
 _Avoid_: String injector, JS payload generator, eval bridge
 
+**System Provisioner (`SystemProvisioner`)**:
+The unified lifecycle management and environment configuration module that resolves runtime directories, registers native messaging host manifests across detected browser variants, deploys AI agent skills, and serializes Model Context Protocol (MCP) client configurations.
+_Avoid_: Installer script, setup helper, config wizard
+
+**REPL Metadata Catalog (`ReplMetadataCatalog`)**:
+The centralized domain repository within the Python REPL runtime that supplies token-budgeted SDK cheatsheets, workflow recipes, and tool prompt schemas to MCP adapters and CLI interfaces.
+_Avoid_: Docstring helper, template store, prompt dictionary
+
 
 
 

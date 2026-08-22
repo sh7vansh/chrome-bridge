@@ -79,6 +79,13 @@ from chrome_bridge.doctor import (
     wait_for_extension_handshake,
 )
 
+from chrome_bridge.provisioner import (
+    HealthReport,
+    ProvisionOptions,
+    ProvisionReport,
+    SystemProvisioner,
+)
+
 
 def run_setup(args: argparse.Namespace) -> int:
     """Execute standard setup workflow with live terminal UI and discovery prober."""
@@ -86,6 +93,7 @@ def run_setup(args: argparse.Namespace) -> int:
     home_dir = resolve_home_dir()
     install_dir = resolve_install_dir(args.target, bool(getattr(args, "dev", False)))
     quiet = args.quiet
+    is_dev = bool(getattr(args, "dev", False))
 
     if not quiet:
         banner("Chrome Bridge 2.0 — Pure Python Live Setup Assistant")
@@ -125,14 +133,14 @@ def run_setup(args: argparse.Namespace) -> int:
 
     # Step 5: Configure MCP Clients
     with ui.spinner("Configuring AI Agent Model Context Protocol (MCP) clients...") as sp:
-        is_dev = bool(getattr(args, "dev", False))
         configure_all_mcp_clients(install_dir, home_dir, python_exec, is_dev=is_dev, quiet=True)
         clients = detect_mcp_clients(home_dir)
         configured_clients = [c.name for c in clients if c.is_configured]
         sp.ok(f"Configured {len(configured_clients)} MCP client(s): {', '.join(configured_clients)}")
 
+    ext_dir = resolve_extension_dir(install_dir, source_dir)
+
     if not quiet:
-        ext_dir = resolve_extension_dir(install_dir, source_dir)
         print()
         print(ui.card("Setup Summary & Ready State", [
             ("Status", ui.green("INSTALLATION READY")),
@@ -148,7 +156,7 @@ def run_setup(args: argparse.Namespace) -> int:
         print(f"     👉 {bold(green(str(ext_dir)))}")
         print(f"  4. Click the {bold(cyan('Chrome Bridge'))} icon in your Chrome toolbar to connect.\n")
 
-    # Step 6: Live Handshake Verification Loop
+    # Live Handshake Verification Loop
     if not quiet and not getattr(args, "no_listen", False):
         print(bold("📡 LIVE EXTENSION VERIFICATION:"))
         timeout = float(getattr(args, "timeout", 15.0) or 15.0)

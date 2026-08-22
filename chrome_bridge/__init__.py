@@ -50,6 +50,7 @@ from .repl import (
     ExecutionTimeoutContext,
     OutputBudgetFormatter,
     PythonReplSession,
+    ReplMetadataCatalog,
     ReplSessionEngine,
     compress_dom_snapshot,
     extract_diagnostic_report,
@@ -94,6 +95,12 @@ from .doctor import (
     simulate_native_host,
     wait_for_extension_handshake,
 )
+from .provisioner import (
+    HealthReport,
+    ProvisionOptions,
+    ProvisionReport,
+    SystemProvisioner,
+)
 
 __all__ = [
     "ChromeBridgeError",
@@ -131,6 +138,7 @@ __all__ = [
     "DomBatchSynthesizer",
     "ReplSessionEngine",
     "PythonReplSession",
+    "ReplMetadataCatalog",
     "ExecutionOutcome",
     "DiagnosticReport",
     "OutputBudgetFormatter",
@@ -170,5 +178,9 @@ __all__ = [
     "run_status",
     "run_cleanup",
     "run_test_ping",
+    "SystemProvisioner",
+    "ProvisionOptions",
+    "ProvisionReport",
+    "HealthReport",
 ]
 
