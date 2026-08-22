@@ -220,25 +220,31 @@ def test_chrome_fluent_actions_single_roundtrip_without_list_tabs():
     # Must NOT have called list_tabs - single roundtrip directly on active context
     assert client.call.call_count == 1
     action_called, params = client.call.call_args[0][0], client.call.call_args[0][1]
-    assert action_called == "execute_script"
+    assert action_called == "find_element"
+    assert params.get("query") == "Submit Form"
+    assert params.get("strategy") == "button"
     assert params.get("tabId") is None
 
 
-def test_tab_find_allocates_remaining_deadline_across_fallbacks():
+def test_tab_find_polymorphic_single_roundtrip_dispatch():
     client = MagicMock()
+    client.call.return_value = {
+        "selector": '[data-cbridge-id="cb_9"]',
+        "tagName": "a",
+        "role": "link",
+        "text": "Sign Up Here",
+    }
     tab = Tab(tab_id=1, client=client)
 
-    tab.find_button = MagicMock(side_effect=ElementNotFoundError("target", tab_id=1))
-    tab.find_input = MagicMock(side_effect=ElementNotFoundError("target", tab_id=1))
-    tab.find_text = MagicMock(return_value=ElementHandle(tab=tab, target="[#9]"))
-
     h = tab.find("Sign Up Here", timeout=1.5)
-    assert h.target == "[#9]"
-
-    # Must allocate remaining budget (> 1.0s) rather than a rigid 1/3 (0.5s)
-    args, kwargs = tab.find_text.call_args
-    passed_timeout = kwargs.get("timeout")
-    assert passed_timeout > 1.0
+    assert h.target == '[data-cbridge-id="cb_9"]'
+    assert client.call.call_count == 1
+    action_called, params = client.call.call_args[0][0], client.call.call_args[0][1]
+    assert action_called == "find_element"
+    assert params.get("query") == "Sign Up Here"
+    assert params.get("strategy") == "polymorphic"
+    assert params.get("timeout") == 1.5
+    assert params.get("tabId") == 1
 
 
 def test_poll_find_sleep_interval():

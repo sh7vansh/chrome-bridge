@@ -230,6 +230,47 @@ class DomCompiler:
             return f"https://www.google.com/search?q={q_enc}"
 
     @classmethod
+    def compile_find_element_rpc(
+        cls,
+        query: Union[str, int, TargetLocator],
+        strategy: str = "polymorphic",
+        exact: bool = False,
+        timeout: float = 1.5,
+        **extra_params: Any,
+    ) -> Dict[str, Any]:
+        """Compile structured find_element Action RPC payload."""
+        norm_query = query
+        if isinstance(query, (int, dict)):
+            norm_query = normalize_locator(query)
+        params = {
+            "query": norm_query,
+            "strategy": strategy,
+            "exact": exact,
+            "timeout": timeout,
+        }
+        params.update(extra_params)
+        return {
+            "action": "find_element",
+            "params": params,
+        }
+
+    @classmethod
+    def compile_query_elements_rpc(
+        cls,
+        selector: str,
+        **extra_params: Any,
+    ) -> Dict[str, Any]:
+        """Compile structured query_elements Action RPC payload."""
+        params = {
+            "selector": selector,
+        }
+        params.update(extra_params)
+        return {
+            "action": "query_elements",
+            "params": params,
+        }
+
+    @classmethod
     def compile_action_rpc(cls, action: str, **params: Any) -> Dict[str, Any]:
         """Validate and compile structured Action RPC payload for extension coordinator dispatch."""
         compiled_params = dict(params)

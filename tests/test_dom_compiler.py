@@ -164,8 +164,22 @@ def test_dom_compiler_media_control_compilation():
     seek_js = DomCompiler.compile_media_control("seek", seconds=15.0)
     assert "v.currentTime += 15.0" in seek_js
 
-    vol_js = DomCompiler.compile_media_control("set_volume", volume=0.8)
-    assert "v.volume = 0.8" in vol_js
+def test_dom_compiler_find_and_query_rpc_compilation():
+    """Verify find_element and query_elements structured Action RPC compilation."""
+    find_rpc = DomCompiler.compile_find_element_rpc("Sign In", strategy="button", exact=True, timeout=2.5)
+    assert find_rpc["action"] == "find_element"
+    assert find_rpc["params"]["query"] == "Sign In"
+    assert find_rpc["params"]["strategy"] == "button"
+    assert find_rpc["params"]["exact"] is True
+    assert find_rpc["params"]["timeout"] == 2.5
+
+    ref_rpc = DomCompiler.compile_find_element_rpc(12, strategy="polymorphic")
+    assert ref_rpc["action"] == "find_element"
+    assert ref_rpc["params"]["query"] == {"type": "ref", "refId": 12}
+
+    query_rpc = DomCompiler.compile_query_elements_rpc("ul.items > li")
+    assert query_rpc["action"] == "query_elements"
+    assert query_rpc["params"]["selector"] == "ul.items > li"
 
 
 

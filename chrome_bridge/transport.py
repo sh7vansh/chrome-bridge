@@ -17,6 +17,7 @@ from .exceptions import (
     BrowserUnavailableError,
     ChromeBridgeError,
     NavigationTimeoutError,
+    decode_domain_error,
 )
 
 
@@ -162,13 +163,17 @@ class InProcessTransportClient:
                 return {"id": 1, "title": "In-Process Tab", "url": "https://example.com", "active": True}
             if action == "get_page_content":
                 return {"snapshot": 'PAGE: "In-Process Tab"\n- button [#1] "Submit"'}
+            if action == "find_element":
+                q = params.get("query", "element") if params else "element"
+                return {"selector": '[data-cbridge-id="cb_1_inproc"]', "tagName": "button", "role": "button", "text": str(q)}
+            if action == "query_elements":
+                return [{"selector": '[data-cbridge-id="cb_1_inproc"]', "tagName": "button", "role": "button", "text": "Item 1"}]
             return {"status": "ok", "action": action}
 
         resp = self.handler(action, params)
         if isinstance(resp, dict):
             if resp.get("success") is False or "error" in resp:
-                from .compiler import DomCompiler
-                DomCompiler.decode_error(
+                decode_domain_error(
                     err_data=resp.get("error"),
                     params=params,
                     auto_snapshot=resp.get("auto_snapshot", self.auto_snapshot),
@@ -253,8 +258,7 @@ class ChromeSocketClient:
                 for resp in messages:
                     if resp.get("id") == req_id:
                         if not resp.get("success", False):
-                            from .compiler import DomCompiler
-                            DomCompiler.decode_error(
+                            decode_domain_error(
                                 err_data=resp.get("error"),
                                 params=params,
                                 auto_snapshot=resp.get("auto_snapshot"),
@@ -280,9 +284,8 @@ class ChromeSocketClient:
             raise BrowserUnavailableError(f"Browser communication error during '{action}'.") from e
 
     def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
-        """Legacy helper for backward compatibility; delegates to DomCompiler."""
-        from .compiler import DomCompiler
-        DomCompiler.decode_error(
+        """Legacy helper for backward compatibility; delegates to decode_domain_error."""
+        decode_domain_error(
             err_data=resp.get("error"),
             params=params,
             auto_snapshot=resp.get("auto_snapshot"),

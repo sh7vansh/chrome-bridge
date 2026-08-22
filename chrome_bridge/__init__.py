@@ -18,6 +18,7 @@ from .exceptions import (
     TargetLocator,
     _extract_hostname,
     _format_ref_id,
+    decode_domain_error,
     normalize_locator,
 )
 from .security import (
@@ -112,6 +113,7 @@ __all__ = [
     "NavigationTimeoutError",
     "TargetLocator",
     "normalize_locator",
+    "decode_domain_error",
     "CRITICAL_DELETION_TERMS",
     "CRITICAL_DELETION_REGEX",
     "SSO_ALLOWLIST",

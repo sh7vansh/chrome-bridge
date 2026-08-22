@@ -151,7 +151,7 @@ def test_action_interception_error_zero_leakage():
 
 
 def test_syntax_and_logic_error_traceback_zero_leakage():
-    session = PythonReplSession()
+    session = PythonReplSession(include_ambient=False)
 
     # Syntax Error
     syntax_out = session.execute("def broken(:")

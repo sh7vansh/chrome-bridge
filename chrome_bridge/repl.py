@@ -514,7 +514,7 @@ class ReplSessionEngine:
                 # Include high-level public methods, exclude socket client / IPC internals
                 if not frame.name.startswith("_") and frame.name not in ("call", "connect", "close", "ping"):
                     clean_frames.append(frame)
-            elif not fn.startswith("<") and "site-packages" not in fn and "lib/python" not in fn:
+            elif not fn.startswith("<") and "chrome_bridge" not in fn and "repl_engine.py" not in fn and "site-packages" not in fn and "lib/python" not in fn:
                 clean_frames.append(frame)
 
         if clean_frames:

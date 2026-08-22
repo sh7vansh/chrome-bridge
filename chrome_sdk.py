@@ -644,69 +644,98 @@ class Tab:
         )
 
     def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
-        """Find a visible DOM element by inner text or accessible content with dynamic micro-wait."""
-        js = DomCompiler.compile_text_finder_js(text, exact=exact)
-        return self._poll_find(lambda: self.eval_js(js), text, timeout=timeout)
+        """Find a visible DOM element by inner text or accessible content in a single roundtrip."""
+        rpc = DomCompiler.compile_find_element_rpc(query=text, strategy="text", exact=exact, timeout=timeout)
+        params = rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(rpc["action"], params, timeout=(timeout or 1.5) + 3.0)
+        if isinstance(res, dict) and (res.get("selector") or res.get("target")):
+            return ElementHandle(
+                tab=self,
+                target=res.get("selector") or res.get("target"),
+                tag_name=res.get("tagName", ""),
+                role=res.get("role", ""),
+                text=res.get("text", ""),
+            )
+        raise ElementNotFoundError(target=text, tab_id=self.id, url=getattr(self, "url", ""))
 
     def find_input(self, placeholder_or_label: str, timeout: float = 1.5) -> ElementHandle:
-        """Find an input, textarea, or select element by placeholder, label, or name with micro-wait."""
-        js = DomCompiler.compile_input_finder_js(placeholder_or_label)
-        return self._poll_find(lambda: self.eval_js(js), placeholder_or_label, timeout=timeout)
+        """Find an input, textarea, or select element by placeholder or label in a single roundtrip."""
+        rpc = DomCompiler.compile_find_element_rpc(query=placeholder_or_label, strategy="input", timeout=timeout)
+        params = rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(rpc["action"], params, timeout=(timeout or 1.5) + 3.0)
+        if isinstance(res, dict) and (res.get("selector") or res.get("target")):
+            return ElementHandle(
+                tab=self,
+                target=res.get("selector") or res.get("target"),
+                tag_name=res.get("tagName", ""),
+                role=res.get("role", ""),
+                text=res.get("text", ""),
+            )
+        raise ElementNotFoundError(target=placeholder_or_label, tab_id=self.id, url=getattr(self, "url", ""))
 
     def find_button(self, name: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
-        """Find a button, submit input, or clickable role by visible name with micro-wait."""
-        js = DomCompiler.compile_button_finder_js(name, exact=exact)
-        return self._poll_find(lambda: self.eval_js(js), name, timeout=timeout)
+        """Find a button, submit input, or clickable element in a single roundtrip."""
+        rpc = DomCompiler.compile_find_element_rpc(query=name, strategy="button", exact=exact, timeout=timeout)
+        params = rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(rpc["action"], params, timeout=(timeout or 1.5) + 3.0)
+        if isinstance(res, dict) and (res.get("selector") or res.get("target")):
+            return ElementHandle(
+                tab=self,
+                target=res.get("selector") or res.get("target"),
+                tag_name=res.get("tagName", ""),
+                role=res.get("role", ""),
+                text=res.get("text", ""),
+            )
+        raise ElementNotFoundError(target=name, tab_id=self.id, url=getattr(self, "url", ""))
 
     def query_all(self, css_selector: str) -> List[ElementHandle]:
-        """Find all matching visible elements by CSS selector and return ElementHandles."""
-        js = DomCompiler.compile_query_all_js(css_selector)
-        res = self.eval_js(js)
+        """Find all matching visible elements by CSS selector in a single roundtrip."""
+        rpc = DomCompiler.compile_query_elements_rpc(selector=css_selector)
+        params = rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(rpc["action"], params)
         raw_items = res if isinstance(res, list) else (res.get("result") if isinstance(res, dict) and isinstance(res.get("result"), list) else [])
         results: List[ElementHandle] = []
-        for item in raw_items:
-            if isinstance(item, dict):
-                target = item.get("selector") or item.get("target") or item.get("ref")
-                if target is not None:
-                    results.append(
-                        ElementHandle(
-                            tab=self,
-                            target=target,
-                            tag_name=item.get("tagName", ""),
-                            role=item.get("role", ""),
-                            text=item.get("text", ""),
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if isinstance(item, dict):
+                    target = item.get("selector") or item.get("target") or item.get("ref")
+                    if target is not None:
+                        results.append(
+                            ElementHandle(
+                                tab=self,
+                                target=target,
+                                tag_name=item.get("tagName", ""),
+                                role=item.get("role", ""),
+                                text=item.get("text", ""),
+                            )
                         )
-                    )
         return results
 
     def find(self, target: Union[str, int], timeout: float = 1.5) -> ElementHandle:
-        """Polymorphically find an element by Ref-ID, CSS selector, button name, input label, or text."""
+        """Polymorphically find an element by Ref-ID, CSS selector, button name, input label, or text in 1 roundtrip."""
         if isinstance(target, int):
             return ElementHandle(tab=self, target=target)
         target_str = str(target).strip()
         if target_str.startswith("[#") or (target_str.startswith("#") and target_str[1:].isdigit()):
             return ElementHandle(tab=self, target=target_str)
 
-        if any(target_str.startswith(c) for c in (".", "#", "[", ">", ":")) or " " in target_str:
-            js = DomCompiler.compile_find_css_js(target_str)
-            try:
-                return self._poll_find(lambda: self.eval_js(js), target_str, timeout=timeout)
-            except ElementNotFoundError:
-                pass
-
-        deadline = time.time() + (timeout if timeout is not None else 1.5)
-        def _remaining_timeout() -> float:
-            return max(0.05, deadline - time.time())
-
-        try:
-            return self.find_button(target_str, timeout=_remaining_timeout())
-        except ElementNotFoundError:
-            pass
-        try:
-            return self.find_input(target_str, timeout=_remaining_timeout())
-        except ElementNotFoundError:
-            pass
-        return self.find_text(target_str, timeout=_remaining_timeout())
+        rpc = DomCompiler.compile_find_element_rpc(query=target_str, strategy="polymorphic", timeout=timeout)
+        params = rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(rpc["action"], params, timeout=(timeout or 1.5) + 3.0)
+        if isinstance(res, dict) and (res.get("selector") or res.get("target")):
+            return ElementHandle(
+                tab=self,
+                target=res.get("selector") or res.get("target"),
+                tag_name=res.get("tagName", ""),
+                role=res.get("role", ""),
+                text=res.get("text", ""),
+            )
+        raise ElementNotFoundError(target=target_str, tab_id=self.id, url=getattr(self, "url", ""))
 
     def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
         """Fill multiple form inputs, textareas, selects, and checkboxes in a single atomic in-page pass."""

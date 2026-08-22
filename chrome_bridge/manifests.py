@@ -23,31 +23,29 @@ PROCDIR_OVERRIDE: Optional[Path] = None
 
 def _is_windows() -> bool:
     sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "IS_WINDOWS"):
+    if sh and hasattr(sh, "IS_WINDOWS") and sh.IS_WINDOWS != IS_WINDOWS:
         return bool(getattr(sh, "IS_WINDOWS"))
     return IS_WINDOWS
 
 
 def _is_mac() -> bool:
     sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "IS_MAC"):
+    if sh and hasattr(sh, "IS_MAC") and sh.IS_MAC != IS_MAC:
         return bool(getattr(sh, "IS_MAC"))
     return IS_MAC
 
 
 def _is_linux() -> bool:
     sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "IS_LINUX"):
+    if sh and hasattr(sh, "IS_LINUX") and sh.IS_LINUX != IS_LINUX:
         return bool(getattr(sh, "IS_LINUX"))
     return IS_LINUX
 
 
 def _procdir_override() -> Optional[Path]:
     sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "PROCDIR_OVERRIDE"):
-        val = getattr(sh, "PROCDIR_OVERRIDE")
-        if val is not None:
-            return val
+    if sh and hasattr(sh, "PROCDIR_OVERRIDE") and sh.PROCDIR_OVERRIDE is not None:
+        return getattr(sh, "PROCDIR_OVERRIDE")
     return PROCDIR_OVERRIDE
 
 
@@ -71,9 +69,6 @@ class BrowserInfo:
 
 def resolve_home_dir() -> Path:
     """Resolve user home directory respecting HOME / USERPROFILE env overrides."""
-    sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "resolve_home_dir") and sh.resolve_home_dir != resolve_home_dir:
-        return sh.resolve_home_dir()
     if "HOME" in os.environ:
         return Path(os.environ["HOME"])
     if "USERPROFILE" in os.environ:
@@ -83,9 +78,6 @@ def resolve_home_dir() -> Path:
 
 def resolve_install_dir(target_arg: Optional[str] = None, is_dev: bool = False) -> Path:
     """Determine installation root directory."""
-    sh = sys.modules.get("setup_host")
-    if sh and hasattr(sh, "resolve_install_dir") and sh.resolve_install_dir != resolve_install_dir:
-        return sh.resolve_install_dir(target_arg, is_dev)
     if target_arg:
         return Path(target_arg).resolve()
     if is_dev:
@@ -230,13 +222,13 @@ exec "$PY_BIN" "$SCRIPT_DIR/native_host.py" "$@"
         return sh_path
 
 
-def detect_running_browsers() -> List[str]:
+def detect_running_browsers(proc_dir: Optional[Path] = None) -> List[str]:
     """Detect currently running Chromium-based browser processes."""
     running: List[str] = []
 
     if _is_linux():
-        proc_dir = _procdir_override() or Path("/proc")
-        if proc_dir.exists():
+        target_proc = proc_dir or _procdir_override() or Path("/proc")
+        if target_proc.exists():
             signatures = {
                 "chrome": "Google Chrome",
                 "google-chrome": "Google Chrome",
@@ -248,14 +240,22 @@ def detect_running_browsers() -> List[str]:
                 "arc": "Arc",
             }
             try:
-                for entry in proc_dir.iterdir():
+                for entry in target_proc.iterdir():
                     if entry.name.isdigit():
                         comm_file = entry / "comm"
+                        cmdline_file = entry / "cmdline"
                         try:
+                            found = False
                             if comm_file.exists():
                                 comm = comm_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
                                 for sig, bname in signatures.items():
                                     if sig in comm and bname not in running:
+                                        running.append(bname)
+                                        found = True
+                            if not found and cmdline_file.exists():
+                                cmdline = cmdline_file.read_bytes().decode("utf-8", errors="ignore").lower()
+                                for sig, bname in signatures.items():
+                                    if sig in cmdline and bname not in running:
                                         running.append(bname)
                         except Exception:
                             continue

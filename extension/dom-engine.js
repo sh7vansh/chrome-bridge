@@ -557,17 +557,295 @@ export function inPageDOMOperation(payload) {
         }
       } catch {}
 
-      const interval = setInterval(() => {
-        if (resolved) {
-          clearInterval(interval);
-          return;
+  function tagElement(el) {
+    if (!el) return null;
+    if (!window.__cb_handle_counter) window.__cb_handle_counter = 0;
+    let bridgeId = el.getAttribute('data-cbridge-id');
+    if (!bridgeId) {
+      bridgeId = 'cb_' + (++window.__cb_handle_counter) + '_' + Date.now().toString(36);
+      el.setAttribute('data-cbridge-id', bridgeId);
+    }
+    const text = getAccessibleName(el);
+    const role = getComputedRole(el);
+    return {
+      selector: '[data-cbridge-id="' + bridgeId + '"]',
+      tagName: el.tagName.toLowerCase(),
+      role: role,
+      text: text.slice(0, 100),
+      id: el.id || '',
+      name: el.getAttribute('name') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      value: el.value || ''
+    };
+  }
+
+  function waitForElement(finderFn, timeoutSec, queryLabel) {
+    return new Promise((resolve) => {
+      const timeoutMs = (typeof timeoutSec === 'number' && timeoutSec > 0) ? timeoutSec * 1000 : 0;
+
+      // Immediate check
+      try {
+        const immediate = finderFn();
+        if (immediate && isVisible(immediate)) {
+          return resolve(tagElement(immediate));
         }
-        onUrlEvent();
-      }, 200);
+      } catch(e) {}
+
+      if (timeoutMs <= 0) {
+        return resolve(null);
+      }
+
+      let resolved = false;
+      let observer = null;
+      let timer = null;
+      let rafId = null;
+
+      function cleanup() {
+        if (observer) {
+          try { observer.disconnect(); } catch {}
+          observer = null;
+        }
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (rafId && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      }
+
+      function check() {
+        if (resolved) return true;
+        try {
+          const found = finderFn();
+          if (found && isVisible(found)) {
+            resolved = true;
+            cleanup();
+            resolve(tagElement(found));
+            return true;
+          }
+        } catch(e) {}
+        return false;
+      }
+
+      try {
+        if (typeof MutationObserver !== 'undefined') {
+          observer = new MutationObserver(() => {
+            check();
+          });
+          const root = document.documentElement || document.body;
+          if (root) {
+            observer.observe(root, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              characterData: true
+            });
+          }
+        }
+      } catch(e) {}
+
+      if (typeof requestAnimationFrame === 'function') {
+        const loop = () => {
+          if (!check()) {
+            rafId = requestAnimationFrame(loop);
+          }
+        };
+        rafId = requestAnimationFrame(loop);
+      }
+
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+
+        // Collect fuzzy suggestions
+        const suggestions = [];
+        try {
+          const qLower = String(queryLabel).toLowerCase();
+          const all = document.querySelectorAll('button, a, input, select, textarea, [role]');
+          for (const el of all) {
+            if (!isVisible(el)) continue;
+            const txt = (getAccessibleName(el) || el.value || '').trim();
+            if (!txt) continue;
+            const tLower = txt.toLowerCase();
+            if (tLower.includes(qLower) || qLower.includes(tLower)) {
+              suggestions.push({
+                ref: el.getAttribute('data-cbridge-id') ? '#' + el.getAttribute('data-cbridge-id') : '#element',
+                role: getComputedRole(el),
+                name: txt.slice(0, 50)
+              });
+              if (suggestions.length >= 5) break;
+            }
+          }
+        } catch(e) {}
+
+        let autoSnapshot = '';
+        try {
+          const snapRes = generateSnapshot();
+          autoSnapshot = snapRes.snapshot || '';
+        } catch(e) {}
+
+        resolve({
+          __error: {
+            code: 'ELEMENT_NOT_FOUND',
+            target: queryLabel,
+            suggestions,
+            auto_snapshot: autoSnapshot,
+            url: window.location.href
+          }
+        });
+      }, timeoutMs);
     });
   }
 
   switch (operation) {
+    case 'find_element': {
+      const { query, strategy = 'polymorphic', exact = false, timeout = 1.5 } = args;
+
+      function getFinder() {
+        const qLower = typeof query === 'string' ? query.toLowerCase().trim() : '';
+        if (strategy === 'text') {
+          return () => {
+            const elements = document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], [role="link"], h1, h2, h3, h4, h5, h6, p, span, li, label, div');
+            let fallback = null;
+            for (const el of elements) {
+              if (!isVisible(el)) continue;
+              const name = getAccessibleName(el);
+              const txt = el.innerText?.trim() || '';
+              if (exact) {
+                if (name === query || txt === query) return el;
+              } else {
+                if (name.toLowerCase().includes(qLower) || txt.toLowerCase().includes(qLower)) {
+                  if (['BUTTON', 'A', 'INPUT'].includes(el.tagName) || el.getAttribute('role')) return el;
+                  if (!fallback) fallback = el;
+                }
+              }
+            }
+            return fallback;
+          };
+        } else if (strategy === 'input') {
+          return () => {
+            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+            let best = null;
+            let bestScore = 0;
+            for (const el of inputs) {
+              if (!isVisible(el)) continue;
+              let score = 0;
+              const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+              const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+              const nm = (el.getAttribute('name') || '').toLowerCase();
+              const id = (el.id || '').toLowerCase();
+              if (ph === qLower || aria === qLower || nm === qLower || id === qLower) score = 100;
+              else if (ph.includes(qLower) || aria.includes(qLower) || nm.includes(qLower)) score = 70;
+
+              if (el.id) {
+                try {
+                  const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                  if (l && (l.innerText.toLowerCase() === qLower || l.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 95);
+                } catch(e) {}
+              }
+              const pLabel = el.closest('label');
+              if (pLabel && (pLabel.innerText.toLowerCase() === qLower || pLabel.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 90);
+
+              if (score > bestScore) {
+                bestScore = score;
+                best = el;
+              }
+            }
+            return best;
+          };
+        } else if (strategy === 'button') {
+          return () => {
+            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], a[role="button"], [role="button"], [role="menuitem"], summary');
+            for (const el of buttons) {
+              if (!isVisible(el)) continue;
+              const name = getAccessibleName(el);
+              const txt = el.innerText?.trim() || el.value?.trim() || '';
+              if (exact) {
+                if (name === query || txt === query) return el;
+              } else {
+                if (name.toLowerCase().includes(qLower) || txt.toLowerCase().includes(qLower)) return el;
+              }
+            }
+            return null;
+          };
+        } else if (strategy === 'css') {
+          return () => {
+            const el = document.querySelector(query);
+            return (el && isVisible(el)) ? el : null;
+          };
+        } else {
+          // Polymorphic strategy
+          return () => {
+            const res = resolveTarget(query);
+            if (res && !res.error && res.el && isVisible(res.el)) return res.el;
+
+            // Check CSS if contains CSS selector chars
+            if (typeof query === 'string' && (['.', '#', '[', '>', ':'].some(c => query.startsWith(c)) || query.includes(' '))) {
+              try {
+                const el = document.querySelector(query);
+                if (el && isVisible(el)) return el;
+              } catch(e) {}
+            }
+
+            // Try button
+            const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]');
+            for (const el of buttons) {
+              if (isVisible(el) && getAccessibleName(el).toLowerCase().includes(qLower)) return el;
+            }
+
+            // Try input
+            const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select');
+            for (const el of inputs) {
+              if (isVisible(el)) {
+                const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+                const nm = (el.getAttribute('name') || '').toLowerCase();
+                if (ph.includes(qLower) || nm.includes(qLower)) return el;
+              }
+            }
+
+            // Try text
+            const texts = document.querySelectorAll('a, p, span, h1, h2, h3, h4, li, div');
+            for (const el of texts) {
+              if (isVisible(el) && (el.innerText?.toLowerCase().includes(qLower) || getAccessibleName(el).toLowerCase().includes(qLower))) {
+                return el;
+              }
+            }
+            return null;
+          };
+        }
+      }
+
+      const finder = getFinder();
+      const res = await waitForElement(finder, timeout, String(query));
+      if (!res) {
+        return {
+          __error: {
+            code: 'ELEMENT_NOT_FOUND',
+            target: String(query),
+            suggestions: [],
+            url: window.location.href
+          }
+        };
+      }
+      return res;
+    }
+
+    case 'query_elements': {
+      const { selector, css_selector } = args;
+      const sel = selector || css_selector || '*';
+      const nodes = document.querySelectorAll(sel);
+      const results = [];
+      for (const el of nodes) {
+        if (isVisible(el)) {
+          results.push(tagElement(el));
+        }
+      }
+      return results;
+    }
+
     case 'snapshot':
       return generateSnapshot();
 
