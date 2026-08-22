@@ -247,19 +247,20 @@ def test_tab_find_polymorphic_single_roundtrip_dispatch():
     assert params.get("tabId") == 1
 
 
-def test_poll_find_sleep_interval():
+def test_tab_find_enforces_zero_python_polling():
     from unittest.mock import patch
 
     client = MagicMock()
+    # Mock the RPC response to simulate a timeout directly from the JS engine,
+    # avoiding any real execution loop.
+    client.send_payload.return_value = {"error": "ElementNotFoundError", "message": "not found"}
     tab = Tab(tab_id=1, client=client)
 
     sleep_calls = []
     with patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
-        with pytest.raises(ElementNotFoundError):
-            tab._poll_find(lambda: None, query="missing", timeout=0.25)
-
-    assert len(sleep_calls) > 0
-    # Spec 035 asks for 100ms (0.1s) polling intervals
-    assert all(abs(s - 0.1) < 1e-3 for s in sleep_calls)
+        with pytest.raises(Exception):
+            tab.find("missing", timeout=0.25)
+            
+    assert len(sleep_calls) == 0, "Python-side time.sleep polling is strictly forbidden. The In-Page DOM Synchronizer handles waiting."
 
 

@@ -6,7 +6,6 @@ from unittest.mock import patch, MagicMock
 from chrome_bridge.doctor import (
     check_stale_ipc,
     check_file_permissions,
-    run_doctor,
 )
 
 

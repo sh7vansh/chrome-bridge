@@ -868,51 +868,6 @@ class DomCompiler:
             pass
         return []
 
-    @classmethod
-    def poll_find_element(
-        cls,
-        tab: Any,
-        finder_func: Callable[[], Any],
-        query: str,
-        handle_factory: Callable[..., Any],
-        timeout: float = 1.5,
-        interval: float = 0.1,
-    ) -> Any:
-        """Poll element discovery evaluation until element is resolved or timeout reached."""
-        deadline = time.time() + max(0.0, timeout)
-        while True:
-            try:
-                info = finder_func()
-                if isinstance(info, dict) and "result" in info and isinstance(info["result"], dict):
-                    info = info["result"]
-                if isinstance(info, dict) and (info.get("selector") or info.get("target")):
-                    return handle_factory(
-                        tab=tab,
-                        target=info.get("selector") or info.get("target"),
-                        tag_name=info.get("tagName", ""),
-                        role=info.get("role", ""),
-                        text=info.get("text", ""),
-                    )
-            except Exception:
-                pass
-            if time.time() >= deadline:
-                break
-            time.sleep(interval)
-
-        suggestions = cls.collect_fuzzy_suggestions(tab, query)
-        snap = None
-        try:
-            snap = tab.snapshot(format="compact", max_tokens=1500)
-        except Exception:
-            pass
-        raise ElementNotFoundError(
-            target=query,
-            tab_id=tab.id,
-            url=getattr(tab, "url", ""),
-            suggestions=suggestions,
-            auto_snapshot=snap,
-        )
-
 
 # Backward-compatible alias
 DomBatchSynthesizer = DomCompiler

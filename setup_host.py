@@ -10,6 +10,8 @@ import argparse
 import os
 import platform
 import sys
+import tempfile
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -71,12 +73,9 @@ from chrome_bridge.mcp_config import (
 from chrome_bridge.doctor import (
     check_file_permissions,
     check_stale_ipc,
-    run_cleanup,
-    run_doctor,
-    run_status,
-    run_test_ping,
     simulate_native_host,
     wait_for_extension_handshake,
+    DoctorEngine,
 )
 
 from chrome_bridge.provisioner import (
@@ -224,5 +223,210 @@ def main() -> None:
         sys.exit(run_setup(parsed))
 
 
-if __name__ == "__main__":
+def run_doctor(
+    install_dir: Path,
+    home_dir: Path,
+    auto_fix: bool = False,
+    quiet: bool = False,
+) -> int:
+    """Comprehensive environment health inspection and self-healing runner."""
+    if not quiet:
+        banner("Chrome Bridge Doctor — Diagnostics & Self-Healing")
+
+    engine = DoctorEngine(install_dir=install_dir, home_dir=home_dir)
+    
+    with ui.spinner("Running diagnostic probes...") as sp:
+        total_issues_count, total_fixed, issues = engine.diagnose(auto_fix=auto_fix)
+        if total_issues_count == 0:
+            sp.ok("All systems clean")
+        else:
+            for iss in issues:
+                if iss.fixed:
+                    sp.ok(f"Repaired: {iss.title}")
+                else:
+                    sp.warn(iss.title)
+
+    if not quiet:
+        print()
+        if total_issues_count == 0:
+            print(ui.card("Doctor Summary: All Systems Operational", [
+                ("Health Status", ui.green("100% HEALTHY")),
+                ("Self-Healing", "No repairs needed"),
+            ]))
+        else:
+            status_text = ui.green(f"{total_fixed}/{total_issues_count} ISSUES REPAIRED") if auto_fix else ui.yellow(f"{total_issues_count} ISSUES DETECTED")
+            print(ui.card("Doctor Summary", [
+                ("Status", status_text),
+                ("Next Action", "All issues resolved" if total_fixed == total_issues_count else f"Run with {ui.cyan('--fix')} to auto-repair"),
+            ]))
+
+    return 0 if (total_issues_count == 0 or total_fixed == total_issues_count) else 1
+
+
+def run_status(args: argparse.Namespace) -> int:
+    """Print system diagnostics and configuration health."""
+    home_dir = resolve_home_dir()
+    install_dir = resolve_install_dir(args.target, bool(getattr(args, "dev", False)))
+
+    banner("Chrome Bridge — Diagnostics & Status")
+
+    venv_dir = install_dir / ".venv"
+    venv_py = venv_dir / ("Scripts/python.exe" if IS_WINDOWS else "bin/python3")
+    has_venv = venv_py.exists()
+
+    host_script = install_dir / "native_host.py"
+    host_wrapper = install_dir / ("native-host.bat" if IS_WINDOWS else "native-host.sh")
+    mcp_server = install_dir / "mcp_server.py"
+    agent_skill = home_dir / ".agent" / "skills" / "chrome-bridge" / "SKILL.md"
+    ext_dir = resolve_extension_dir(install_dir)
+
+    print(ui.card("System & Runtime Diagnostics", [
+        ("Platform", f"{platform.system()} ({platform.machine()}) - {platform.release()}"),
+        ("Python", f"{sys.version.split()[0]} ({sys.executable})"),
+        ("Runtime Root", f"{install_dir} ({'Found' if install_dir.exists() else 'Missing'})"),
+        ("Extension Dir", f"{ext_dir} ({'Found' if ext_dir.exists() else 'Missing'})"),
+        ("Python venv", f"{venv_py} ({'Active' if has_venv else 'Not Provisioned'})"),
+        ("Native Host", f"{host_script} ({'Present' if host_script.exists() else 'Missing'})"),
+        ("Host Launcher", f"{host_wrapper} ({'Present' if host_wrapper.exists() else 'Not Generated'})"),
+        ("MCP Server", f"{mcp_server} ({'Present' if mcp_server.exists() else 'Missing'})"),
+        ("Agent Skill", f"{agent_skill} ({'Installed' if agent_skill.exists() else 'Not Installed'})"),
+    ]))
+    print()
+
+    browsers = detect_installed_browsers(home_dir)
+    browser_items = []
+    for b in browsers:
+        status_parts = []
+        if b.is_running:
+            status_parts.append(ui.green("Running"))
+        if b.manifest_path.exists():
+            status_parts.append(ui.green("Manifest Configured"))
+        else:
+            status_parts.append(ui.yellow("No Manifest"))
+        browser_items.append((b.name, f"[{' | '.join(status_parts)}] ({b.manifest_path})"))
+
+    if browser_items:
+        print(ui.card("Browser Native Messaging Manifests", browser_items))
+    else:
+        print(ui.yellow("⚠️ No browsers detected in default paths."))
+    print()
+
+    clients = detect_mcp_clients(home_dir)
+    client_items = []
+    for c in clients:
+        if c.is_present:
+            st = ui.green("Configured") if c.is_configured else ui.yellow("Missing entry")
+            client_items.append((c.name, f"[{st}] {c.config_path}"))
+        else:
+            client_items.append((c.name, ui.dim(f"Not present ({c.config_path})")))
+
+    print(ui.card("AI Agent MCP Configurations", client_items))
+    print()
+    return 0
+
+
+def run_cleanup(args: argparse.Namespace) -> int:
+    """Remove registered manifests, launcher scripts, and IPC endpoint files."""
+    home_dir = resolve_home_dir()
+    install_dir = resolve_install_dir(args.target, bool(getattr(args, "dev", False)))
+
+    print(bold("Cleaning up Chrome Bridge native manifests, launchers, and endpoints..."))
+    targets = get_browser_manifest_targets(home_dir)
+    for _, path in targets:
+        if path.exists():
+            try:
+                path.unlink()
+                print(f"  {green('✓')} Removed {path}")
+            except Exception:
+                pass
+
+    for fname in ("native-host.sh", "native-host.bat", f"{HOST_NAME}.json"):
+        p = install_dir / fname
+        if p.exists():
+            try:
+                p.unlink()
+                print(f"  {green('✓')} Removed {p}")
+            except Exception:
+                pass
+
+    for temp_name in ("antigravity_chrome_bridge.sock", "antigravity_chrome_bridge.port"):
+        t_path = Path(tempfile.gettempdir()) / temp_name
+        if t_path.exists():
+            try:
+                t_path.unlink()
+                print(f"  {green('✓')} Unlinked IPC endpoint: {t_path}")
+            except Exception:
+                pass
+
+    if IS_WINDOWS:
+        reg_subkeys = [
+            rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}",
+            rf"Software\Chromium\NativeMessagingHosts\{HOST_NAME}",
+        ]
+        try:
+            import winreg
+            for subkey in reg_subkeys:
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, subkey)
+                    print(f"  {green('✓')} Deleted Windows Registry Key: {dim(subkey)}")
+                except Exception:
+                    pass
+        except Exception:
+            for subkey in reg_subkeys:
+                try:
+                    subprocess.run(
+                        ["reg.exe", "delete", f"HKCU\\{subkey}", "/f"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                except Exception:
+                    pass
+
+    print(green("Cleanup complete."))
+    return 0
+
+
+def run_test_ping(args: argparse.Namespace) -> int:
+    """Verify IPC endpoint and test active connectivity."""
+    print(bold("Verifying Chrome Bridge IPC connectivity..."))
+    import socket
+
+    sock_path = Path(tempfile.gettempdir()) / "antigravity_chrome_bridge.sock"
+    port_path = Path(tempfile.gettempdir()) / "antigravity_chrome_bridge.port"
+
+    if IS_WINDOWS:
+        if not port_path.exists():
+            print(f"  {yellow('○')} Native host port file not active (host is idle until Chrome opens).")
+            return 0
+        try:
+            port = int(port_path.read_text(encoding="utf-8").strip())
+            with socket.create_connection(("127.0.0.1", port), timeout=2.0) as s:
+                s.settimeout(2.0)
+                s.sendall(b'{"id":9999,"action":"ping"}\n')
+                print(f"  {green('✓')} Successfully connected to Native Host TCP port {port}.")
+                return 0
+        except Exception as e:
+            print(f"  {yellow('⚠️')} Host port file present but connection failed: {e}")
+            return 1
+    else:
+        if not sock_path.exists():
+            print(f"  {yellow('○')} Native host socket not active (host is idle until Chrome opens).")
+            return 0
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(2.0)
+                s.connect(str(sock_path))
+                s.sendall(b'{"id":9999,"action":"ping"}\n')
+                print(f"  {green('✓')} Successfully connected and verified Native Host Unix socket: {sock_path}")
+                return 0
+        except Exception as e:
+            print(f"  {yellow('⚠️')} Host socket file present but connection failed: {e}")
+            return 1
+
+
+
+if __name__ == '__main__':
     main()

@@ -633,16 +633,6 @@ class Tab:
     def _collect_fuzzy_suggestions(self, query: str) -> List[Dict[str, Any]]:
         return DomCompiler.collect_fuzzy_suggestions(self, query)
 
-    def _poll_find(self, finder_func, query: str, timeout: float = 1.5, interval: float = 0.1) -> ElementHandle:
-        return DomCompiler.poll_find_element(
-            tab=self,
-            finder_func=finder_func,
-            query=query,
-            handle_factory=ElementHandle,
-            timeout=timeout,
-            interval=interval,
-        )
-
     def find_text(self, text: str, exact: bool = False, timeout: float = 1.5) -> ElementHandle:
         """Find a visible DOM element by inner text or accessible content in a single roundtrip."""
         rpc = DomCompiler.compile_find_element_rpc(query=text, strategy="text", exact=exact, timeout=timeout)
