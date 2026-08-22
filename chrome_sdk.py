@@ -353,11 +353,21 @@ class Tab:
         url: str = "",
         active: bool = False,
     ):
+        from chrome_bridge.transport import ClosedLoopTransportEngine, ChromeSocketClient
+        from chrome_bridge.security import global_safety
+        
+        raw_client = client or ChromeSocketClient()
+        if isinstance(raw_client, ClosedLoopTransportEngine):
+            engine = raw_client
+        else:
+            engine = ClosedLoopTransportEngine(raw_client, global_safety)
+            
         self.id = tab_id
-        self._client = client or ChromeSocketClient()
+        self._client = engine
         self.title = title
         self.url = url
         self.active = active
+        self.safety = global_safety
         self._media_controller: Optional[TabMedia] = None
         self.allowed_origins: Set[str] = set()
         if self.url:
@@ -407,22 +417,6 @@ class Tab:
             self._media_controller = TabMedia(self)
         return self._media_controller
 
-    def _safety_check_action(
-        self,
-        action: str,
-        target: Any = None,
-        text: str = "",
-        safety_check: bool = True,
-    ) -> None:
-        """Verify action against SecurityGateway Layer 2 and Layer 5."""
-        self.safety.verify_action(
-            action=action,
-            target=target,
-            url=self.url,
-            tab_id=self.id,
-            text=text,
-            safety_check=safety_check,
-        )
 
     def activate(self) -> Dict[str, Any]:
         """Focus and switch to this tab."""
@@ -494,11 +488,11 @@ class Tab:
         safety_check: bool = True,
     ) -> Dict[str, Any]:
         """Click an element identified by Ref-ID or CSS selector."""
-        self._safety_check_action("click", target, safety_check=safety_check)
+
         loc = normalize_locator(target)
         return self._client.call(
             "click",
-            {"target": loc, "button": button, "count": count, "tabId": self.id},
+            {"target": loc, "button": button, "count": count, "tabId": self.id, "_skip_security": not safety_check},
             timeout=15.0,
         )
 
@@ -511,14 +505,14 @@ class Tab:
         safety_check: bool = True,
     ) -> Dict[str, Any]:
         """Type text into an input, textarea, or contenteditable element."""
-        self._safety_check_action("type", target, text=text, safety_check=safety_check)
+
         loc = normalize_locator(target)
         return self._client.call(
             "type",
             {
                 "target": loc,
                 "text": text,
-                "clear": clear,
+                "clear": clear, "_skip_security": not safety_check,
                 "pressEnter": press_enter,
                 "tabId": self.id,
             },
@@ -527,14 +521,14 @@ class Tab:
 
     def press_key(self, key: str, safety_check: bool = True) -> Dict[str, Any]:
         """Press a keyboard key (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown')."""
-        self._safety_check_action("press_key", key, safety_check=safety_check)
-        return self._client.call("press_key", {"key": key, "tabId": self.id})
+
+        return self._client.call("press_key", {"key": key, "tabId": self.id, "_skip_security": not safety_check})
 
     def select(self, target: TargetLocator, value: str, safety_check: bool = True) -> Dict[str, Any]:
         """Select an option in a <select> dropdown by value or label."""
-        self._safety_check_action("select", target, text=value, safety_check=safety_check)
+
         loc = normalize_locator(target)
-        return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id})
+        return self._client.call("select_option", {"target": loc, "value": value, "tabId": self.id, "_skip_security": not safety_check})
 
     def hover(self, target: TargetLocator) -> Dict[str, Any]:
         """Hover mouse pointer over an element to trigger tooltips or dropdown menus."""
@@ -543,7 +537,7 @@ class Tab:
 
     def scroll(self, x: int = 0, y: int = 500, target: Optional[TargetLocator] = None) -> Dict[str, Any]:
         """Scroll the window or a specific scrollable container."""
-        self._safety_check_action("scroll", target)
+
         loc = normalize_locator(target) if target is not None else None
         return self._client.call("scroll", {"x": x, "y": y, "target": loc, "tabId": self.id})
 
@@ -815,7 +809,7 @@ class Chrome(Tab):
     """
 
     def __init__(self, client: Optional[TransportClient] = None):
-        super().__init__(tab_id=None, client=client or ChromeSocketClient(), active=True)
+        super().__init__(tab_id=None, client=client, active=True)
         self.safety = global_safety
 
     def __repr__(self) -> str:

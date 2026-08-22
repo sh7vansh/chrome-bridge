@@ -39,6 +39,7 @@ def test_element_handle_chaining():
     client.call.assert_called_with(
         "select_option",
         {"target": {"type": "ref", "refId": 10}, "value": "option_1", "tabId": 1},
+        timeout=15.0
     )
 
     # Hover chaining
@@ -47,6 +48,7 @@ def test_element_handle_chaining():
     client.call.assert_called_with(
         "hover",
         {"target": {"type": "ref", "refId": 10}, "tabId": 1},
+        timeout=15.0
     )
 
 

@@ -113,6 +113,11 @@ _Avoid_: Docstring helper, template store, prompt dictionary
 
 
 
+
+**Closed-Loop Transport Engine**:
+The execution and dispatch seam that wraps the entire lifecycle of an action (request, execution, security enforcement, and error handling) to ensure any failure instantly generates a Diagnostic Report with a Semantic DOM Auto-Snapshot, keeping the AI Agent in a self-healing loop without leaking raw stack traces.
+_Avoid_: Open loop dispatcher, raw transport client, dumb socket wrapper
+
 ## Abstraction Seam Guarantees
 
 1. **Zero Information Leakage**: The Driver interface (`execute_python`) and all associated error exceptions must never expose internal transport mechanics, socket paths, Native Messaging hosts, or Manifest V3 background workers.

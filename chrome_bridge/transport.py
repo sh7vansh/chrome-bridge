@@ -17,7 +17,6 @@ from .exceptions import (
     BrowserUnavailableError,
     ChromeBridgeError,
     NavigationTimeoutError,
-    decode_domain_error,
 )
 
 
@@ -171,15 +170,6 @@ class InProcessTransportClient:
             return {"status": "ok", "action": action}
 
         resp = self.handler(action, params)
-        if isinstance(resp, dict):
-            if resp.get("success") is False or "error" in resp:
-                decode_domain_error(
-                    err_data=resp.get("error"),
-                    params=params,
-                    auto_snapshot=resp.get("auto_snapshot", self.auto_snapshot),
-                )
-            if "result" in resp and "success" in resp:
-                return resp["result"]
         return resp
 
 
@@ -257,13 +247,7 @@ class ChromeSocketClient:
                 messages, self._buffer = IpcFramingEngine.unpack_line_delimited_buffer(self._buffer)
                 for resp in messages:
                     if resp.get("id") == req_id:
-                        if not resp.get("success", False):
-                            decode_domain_error(
-                                err_data=resp.get("error"),
-                                params=params,
-                                auto_snapshot=resp.get("auto_snapshot"),
-                            )
-                        return resp.get("result")
+                        return resp
 
                 chunk = self._sock.recv(65536)
                 if not chunk:
@@ -283,13 +267,6 @@ class ChromeSocketClient:
             self.close()
             raise BrowserUnavailableError(f"Browser communication error during '{action}'.") from e
 
-    def _raise_structured_error(self, resp: Dict[str, Any], params: Optional[Dict[str, Any]]) -> None:
-        """Legacy helper for backward compatibility; delegates to decode_domain_error."""
-        decode_domain_error(
-            err_data=resp.get("error"),
-            params=params,
-            auto_snapshot=resp.get("auto_snapshot"),
-        )
 
 
 # Global map of pending client requests: request_id -> asyncio.StreamWriter
@@ -504,3 +481,42 @@ class NativeIpcServer:
 # Backward-compatible alias
 NativeHostBridge = NativeIpcServer
 
+
+
+class ClosedLoopTransportEngine:
+    """The execution seam wrapping requests with security enforcement and error diagnostics."""
+    
+    def __init__(self, raw_transport, gateway=None):
+        self.raw = raw_transport
+        self.gateway = gateway
+
+    def call(self, action: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Any:
+        params = params or {}
+        
+        # Pre-flight Security Checks
+        skip_security = params.pop("_skip_security", False)
+        target = params.get("target")
+        
+        if self.gateway:
+            self.gateway.verify_action(
+                action=action,
+                target=target,
+                text=params.get("text") or params.get("value") or "",
+                tab_id=params.get("tabId"),
+                safety_check=not skip_security
+            )
+        
+        # Raw Transport Execution
+        resp = self.raw.call(action, params, timeout=timeout)
+        
+        # Closed-Loop Diagnostics Recovery
+        if isinstance(resp, dict):
+            from .exceptions import decode_domain_error
+            if not resp.get("success", True) or "error" in resp:
+                decode_domain_error(
+                    err_data=resp.get("error"),
+                    params=params,
+                    auto_snapshot=resp.get("auto_snapshot")
+                )
+            return resp.get("result", resp)
+        return resp

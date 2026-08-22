@@ -60,7 +60,7 @@ def test_tab_close_on_last_tab_spawns_blank_tab_first():
 
     assert res["success"] is True
     assert client.call.call_count == 3
-    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[0][0] [0] == "list_tabs"
     assert client.call.call_args_list[1][0] == ("navigate", {"url": "about:blank", "newTab": True})
     assert client.call.call_args_list[2][0] == ("close_tab", {"tabId": 2})
 
@@ -82,7 +82,7 @@ def test_tab_close_with_multiple_tabs_does_not_spawn_new_tab():
 
     assert res["success"] is True
     assert client.call.call_count == 2
-    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[0][0] [0] == "list_tabs"
     assert client.call.call_args_list[1][0] == ("close_tab", {"tabId": 2})
 
 
@@ -100,7 +100,7 @@ def test_tab_close_fallback_on_list_tabs_error():
 
     assert res["success"] is True
     assert client.call.call_count == 2
-    assert client.call.call_args_list[0][0] == ("list_tabs",)
+    assert client.call.call_args_list[0][0] [0] == "list_tabs"
     assert client.call.call_args_list[1][0] == ("close_tab", {"tabId": 2})
 
 
@@ -161,7 +161,7 @@ def test_chrome_singleton_dispatches_single_roundtrip_action():
 
     assert "- button [#1]" in snapshot
     # Verifies single-roundtrip optimization (tabId=None) without redundant list_tabs call
-    client.call.assert_called_once_with("get_page_content", {"tabId": None, "compact": True})
+    client.call.assert_called_once_with("get_page_content", {"tabId": None, "compact": True}, timeout=15.0)
 
 
 def test_chrome_active_tab_resolves_scoped_handle():

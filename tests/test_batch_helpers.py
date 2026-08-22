@@ -23,7 +23,7 @@ def test_fill_form_standard_fields():
         "mapping": form_data,
         "submit": None,
         "tabId": 1,
-    })
+    }, timeout=15.0)
 
 
 def test_fill_form_with_checkbox_and_submit():
@@ -44,7 +44,7 @@ def test_fill_form_with_checkbox_and_submit():
         "mapping": {"Username": "bob123", "I agree": True},
         "submit": "Register",
         "tabId": 1,
-    })
+    }, timeout=15.0)
 
 
 def test_fill_form_with_radio_buttons():
@@ -59,7 +59,7 @@ def test_fill_form_with_radio_buttons():
         "mapping": {"Delivery Option": "Express Delivery"},
         "submit": None,
         "tabId": 1,
-    })
+    }, timeout=15.0)
 
 
 def test_extract_items():

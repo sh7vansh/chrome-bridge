@@ -118,7 +118,9 @@ def test_in_process_transport_client_built_in_adapter():
             }
         return {"success": True, "result": {"navigated": True}}
 
-    err_client = InProcessTransportClient(handler=mock_dispatcher)
+    from chrome_bridge.transport import ClosedLoopTransportEngine
+    raw_err_client = InProcessTransportClient(handler=mock_dispatcher)
+    err_client = ClosedLoopTransportEngine(raw_err_client)
     with pytest.raises(ElementNotFoundError) as exc_info:
         err_client.call("click", {"target": {"type": "ref", "refId": 99}})
 

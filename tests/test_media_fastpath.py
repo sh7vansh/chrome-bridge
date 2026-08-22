@@ -27,7 +27,7 @@ def test_chrome_get_tab_returns_tab_instance():
     tab = chrome.get_tab(42)
     assert isinstance(tab, Tab)
     assert tab.id == 42
-    assert tab._client == client
+    assert getattr(tab._client, "raw", tab._client) == client
 
 
 def test_media_status_evaluates_js_and_returns_dict():

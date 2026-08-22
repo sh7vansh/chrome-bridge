@@ -77,7 +77,7 @@ def test_microsecond_performance_benchmark():
     iterations = 5000
     start = time.perf_counter()
     for i in range(iterations):
-        tab._safety_check_action("click", f"button#normal-submit-{i}")
+        tab.safety.verify_action("click", f"button#normal-submit-{i}", tab_id=tab.id)
     elapsed = time.perf_counter() - start
     avg_us = (elapsed / iterations) * 1_000_000
 
