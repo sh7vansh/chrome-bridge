@@ -271,6 +271,42 @@ class DomCompiler:
         }
 
     @classmethod
+    def compile_extract_items_rpc(
+        cls,
+        container_selector: str,
+        fields: Dict[str, str],
+        **extra_params: Any,
+    ) -> Dict[str, Any]:
+        """Compile structured extract_items Action RPC payload."""
+        params = {
+            "item_selector": container_selector,
+            "fields": fields,
+        }
+        params.update(extra_params)
+        return {
+            "action": "extract_items",
+            "params": params,
+        }
+
+    @classmethod
+    def compile_fill_form_rpc(
+        cls,
+        mapping: Dict[str, Any],
+        submit: Optional[Union[str, bool]] = None,
+        **extra_params: Any,
+    ) -> Dict[str, Any]:
+        """Compile structured fill_form Action RPC payload."""
+        params = {
+            "mapping": mapping,
+            "submit": submit,
+        }
+        params.update(extra_params)
+        return {
+            "action": "fill_form",
+            "params": params,
+        }
+
+    @classmethod
     def compile_action_rpc(cls, action: str, **params: Any) -> Dict[str, Any]:
         """Validate and compile structured Action RPC payload for extension coordinator dispatch."""
         compiled_params = dict(params)
@@ -281,6 +317,7 @@ class DomCompiler:
             "action": action,
             "params": compiled_params,
         }
+
 
     @classmethod
     def compile_media_control(cls, action: str, **kwargs: Any) -> str:

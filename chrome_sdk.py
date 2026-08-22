@@ -739,7 +739,7 @@ class Tab:
 
     def fill_form(self, mapping: Dict[str, Any], submit: Optional[Union[str, bool]] = None) -> Dict[str, Any]:
         """Fill multiple form inputs, textareas, selects, and checkboxes in a single atomic in-page pass."""
-        action_rpc = DomCompiler.compile_action_rpc("fill_form", mapping=mapping, submit=submit)
+        action_rpc = DomCompiler.compile_fill_form_rpc(mapping=mapping, submit=submit)
         params = action_rpc.get("params", {})
         params["tabId"] = self.id
         res = self._client.call(action_rpc["action"], params)
@@ -751,13 +751,19 @@ class Tab:
 
     def extract_items(self, container_selector: str, fields: Dict[str, str]) -> List[Dict[str, str]]:
         """Extract structured data rows and attributes across repeated container elements in a single JS pass."""
-        js = DomCompiler.compile_extract_items_js(container_selector, fields)
-        res = self.eval_js(js)
+        action_rpc = DomCompiler.compile_extract_items_rpc(container_selector=container_selector, fields=fields)
+        params = action_rpc.get("params", {})
+        params["tabId"] = self.id
+        res = self._client.call(action_rpc["action"], params)
         if isinstance(res, list):
             return res
-        elif isinstance(res, dict) and "result" in res and isinstance(res["result"], list):
-            return res["result"]
+        elif isinstance(res, dict):
+            if "items" in res and isinstance(res["items"], list):
+                return res["items"]
+            elif "result" in res and isinstance(res["result"], list):
+                return res["result"]
         return []
+
 
     _SEARCH_ENGINES: Dict[str, str] = DomCompiler.SEARCH_ENGINES
 

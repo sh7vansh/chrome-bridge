@@ -243,64 +243,10 @@ def decode_domain_error(
     params: Optional[Dict[str, Any]] = None,
     auto_snapshot: Optional[str] = None,
 ) -> None:
-    """Decode backend error JSON payload into domain exceptions with auto-snapshot recovery."""
-    if isinstance(err_data, dict) and not auto_snapshot:
-        auto_snapshot = err_data.get("auto_snapshot")
+    """Decode backend error JSON payload into domain exceptions with auto-snapshot recovery.
 
-    target_loc = params.get("target") if params else None
-    target_str = ""
-    if isinstance(target_loc, dict):
-        if target_loc.get("type") == "ref":
-            target_str = f"[#{target_loc.get('refId')}]"
-        else:
-            target_str = str(target_loc.get("selector", ""))
-    elif target_loc is not None:
-        target_str = str(target_loc)
+    Delegates directly to DomCompiler.decode_error.
+    """
+    from .compiler import DomCompiler
+    DomCompiler.decode_error(err_data=err_data, params=params, auto_snapshot=auto_snapshot)
 
-    tab_id = params.get("tabId") if params else None
-
-    exc = None
-    if isinstance(err_data, dict):
-        code = err_data.get("code") or err_data.get("name")
-        if code == "ELEMENT_NOT_FOUND" or "not found" in str(err_data.get("message", "")).lower():
-            exc = ElementNotFoundError(
-                target=err_data.get("target", target_str),
-                tab_id=err_data.get("tabId", tab_id),
-                stale=err_data.get("stale", False),
-                suggestions=err_data.get("suggestions", []),
-                url=err_data.get("url", ""),
-            )
-        elif code == "ACTION_INTERCEPTED":
-            exc = ActionInterceptionError(
-                target=err_data.get("target", target_str),
-                interceptor_tag=err_data.get("interceptorTag", "overlay"),
-                interceptor_ref=err_data.get("interceptorRef"),
-                interceptor_desc=err_data.get("interceptorDesc", ""),
-                tab_id=err_data.get("tabId", tab_id),
-            )
-        elif code == "TIMEOUT":
-            exc = NavigationTimeoutError(
-                target=err_data.get("target", target_str),
-                timeout=err_data.get("timeout", 10.0),
-                url=err_data.get("url", ""),
-                ready_state=err_data.get("readyState", "unknown"),
-                dom_state=err_data.get("domState", "unknown"),
-                tab_id=err_data.get("tabId", tab_id),
-            )
-        else:
-            exc = ChromeBridgeError(err_data.get("message", str(err_data)), tab_id=tab_id)
-    else:
-        err_str = str(err_data)
-        if "not found" in err_str.lower():
-            exc = ElementNotFoundError(target=target_str, tab_id=tab_id)
-        elif "intercepted" in err_str.lower():
-            exc = ActionInterceptionError(target=target_str, tab_id=tab_id)
-        elif "timed out" in err_str.lower():
-            exc = NavigationTimeoutError(target=target_str, tab_id=tab_id)
-        else:
-            exc = ChromeBridgeError(err_str, tab_id=tab_id)
-
-    if auto_snapshot and exc:
-        exc.auto_snapshot = auto_snapshot
-    if exc:
-        raise exc

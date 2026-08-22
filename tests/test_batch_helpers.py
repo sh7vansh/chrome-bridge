@@ -65,7 +65,7 @@ def test_fill_form_with_radio_buttons():
 def test_extract_items():
     client = MagicMock()
     client.call.return_value = {
-        "result": [
+        "items": [
             {"title": "First Article", "url": "https://example.com/1", "author": "John"},
             {"title": "Second Article", "url": "https://example.com/2", "author": "Jane"},
         ]
@@ -82,10 +82,12 @@ def test_extract_items():
     assert items[0]["url"] == "https://example.com/1"
     assert items[1]["title"] == "Second Article"
     assert client.call.call_count == 1
-    # Check JS code evaluates container and field query
+    # Check structured Action RPC call
     call_args = client.call.call_args_list[0]
-    assert call_args[0][0] == "execute_script"
-    assert "article.post" in call_args[0][1]["code"]
+    assert call_args[0][0] == "extract_items"
+    assert call_args[0][1]["item_selector"] == "article.post"
+    assert call_args[0][1]["fields"] == {"title": "h2.title", "url": "a@href", "author": ".author-name"}
+    assert call_args[0][1]["tabId"] == 1
 
 
 def test_extract_items_complex_attributes():
@@ -93,7 +95,7 @@ def test_extract_items_complex_attributes():
     tab = Tab(tab_id=1, client=client)
 
     client.call.return_value = {
-        "result": [
+        "items": [
             {
                 "title": "Pro Headphones",
                 "image": "https://example.com/img1.jpg",
@@ -126,23 +128,25 @@ def test_extract_items_complex_attributes():
     assert items[0]["aria"] == "Add Pro Headphones to cart"
     assert items[0]["id"] == "prod-1"
 
-    # Verify generated JS contains all selector mappings
+    # Verify structured Action RPC payload contains all selector mappings
     call_args = client.call.call_args_list[0]
-    code = call_args[0][1]["code"]
-    assert "div.product-card" in code
-    assert "img.thumbnail@src" in code
-    assert "@data-sku" in code
+    assert call_args[0][0] == "extract_items"
+    assert call_args[0][1]["item_selector"] == "div.product-card"
+    assert call_args[0][1]["fields"] == fields
+
+    # Verify DomBatchSynthesizer JS template compilation
+    from chrome_sdk import DomBatchSynthesizer
+    js_code = DomBatchSynthesizer.compile_extract_items_js("div.product-card", fields)
+    assert "div.product-card" in js_code
+    assert "img.thumbnail@src" in js_code
+    assert "@data-sku" in js_code
 
 
 def test_extract_items_text_keyword_does_not_query_selector():
-    client = MagicMock()
-    tab = Tab(tab_id=1, client=client)
-    client.call.return_value = {"result": [{"content": "Hello World"}]}
-
-    tab.extract_items("div.message", fields={"content": "text"})
-    call_args = client.call.call_args_list[0]
-    code = call_args[0][1]["code"]
+    from chrome_sdk import DomBatchSynthesizer
+    code = DomBatchSynthesizer.compile_extract_items_js("div.message", {"content": "text"})
     assert "sel !== 'text'" in code or "sel.toLowerCase() !== 'text'" in code or "toLowerCase() === 'text'" in code
+
 
 
 

@@ -182,4 +182,18 @@ def test_dom_compiler_find_and_query_rpc_compilation():
     assert query_rpc["params"]["selector"] == "ul.items > li"
 
 
+def test_dom_compiler_extract_and_fill_rpc_compilation():
+    """Verify extract_items and fill_form structured Action RPC compilation."""
+    ext_rpc = DomCompiler.compile_extract_items_rpc("div.card", {"title": "h2", "link": "a@href"})
+    assert ext_rpc["action"] == "extract_items"
+    assert ext_rpc["params"]["item_selector"] == "div.card"
+    assert ext_rpc["params"]["fields"] == {"title": "h2", "link": "a@href"}
+
+    fill_rpc = DomCompiler.compile_fill_form_rpc({"Name": "Alice", "Agree": True}, submit="Submit")
+    assert fill_rpc["action"] == "fill_form"
+    assert fill_rpc["params"]["mapping"] == {"Name": "Alice", "Agree": True}
+    assert fill_rpc["params"]["submit"] == "Submit"
+
+
+
 
