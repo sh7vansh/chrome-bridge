@@ -454,6 +454,8 @@ class Tab:
 
         res = self._client.call("navigate", {"url": url, "tabId": self.id}, timeout=timeout)
         self.url = res.get("url", url) if isinstance(res, dict) else url
+        if isinstance(res, dict) and res.get("title"):
+            self.title = res.get("title")
         target_host = _extract_hostname(url)
         if target_host:
             self.allowed_origins.add(target_host)

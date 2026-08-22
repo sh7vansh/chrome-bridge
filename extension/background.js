@@ -3,6 +3,7 @@ import { inPageDOMOperation } from './dom-engine.js';
 const HOST_NAME = 'com.chrome_bridge.native';
 let nativePort = null;
 let reconnectTimer = null;
+const globalTitleCache = new Map();
 
 async function updateBadge(status) {
   if (status === 'connected') {
@@ -161,6 +162,26 @@ export const TabExecutionCoordinator = {
         customErr.structuredError = res.__error;
         throw customErr;
       }
+
+      if (operation === 'click' || (operation === 'type' && args.pressEnter)) {
+        await new Promise(r => setTimeout(r, 150));
+        try {
+          const tab = await chrome.tabs.get(targetId);
+          if (tab.status === 'loading') {
+            await new Promise(resolve => {
+              const listener = (uTabId, info) => {
+                if (uTabId === targetId && info.status === 'complete') {
+                  chrome.tabs.onUpdated.removeListener(listener);
+                  resolve();
+                }
+              };
+              chrome.tabs.onUpdated.addListener(listener);
+              setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 15000);
+            });
+          }
+        } catch (e) {}
+      }
+
       return res;
     } catch (err) {
       if (err.structuredError) throw err;
@@ -248,7 +269,7 @@ async function handleAction(action, params) {
       return tabs.map(t => ({
         id: t.id,
         url: t.url,
-        title: t.title,
+        title: globalTitleCache.has(t.id) ? globalTitleCache.get(t.id) : t.title,
         active: t.active,
         windowId: t.windowId
       }));
@@ -269,19 +290,85 @@ async function handleAction(action, params) {
     case 'navigate': {
       const { url = 'about:blank', tabId, newTab = (action === 'new_tab') } = params;
       if (!url && action === 'navigate') throw new Error('Missing "url" parameter');
-      if (newTab || action === 'new_tab') {
-        const created = await chrome.tabs.create({ url: url || 'about:blank', active: true });
-        return { tabId: created.id, url: created.url };
-      }
-      const targetId = await resolveTabId(tabId);
-      const updated = await chrome.tabs.update(targetId, { url });
-      return { tabId: updated.id, url: updated.url };
+      
+      return new Promise(async (resolve, reject) => {
+        try {
+          let targetId;
+          if (newTab || action === 'new_tab') {
+            const created = await chrome.tabs.create({ url: url || 'about:blank', active: true });
+            targetId = created.id;
+          } else {
+            targetId = await resolveTabId(tabId);
+            await chrome.tabs.update(targetId, { url });
+          }
+
+          const listener = async (updatedTabId, info, tab) => {
+            if (updatedTabId === targetId && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              try {
+                const scriptRes = await chrome.scripting.executeScript({
+                  target: { tabId: targetId },
+                  func: () => {
+                    return new Promise(res => {
+                      if (document.title && document.title !== 'New Tab' && document.title !== 'about:blank') {
+                        return res(document.title);
+                      }
+                      const observer = new MutationObserver(() => {
+                        if (document.title && document.title !== 'New Tab') {
+                          observer.disconnect();
+                          res(document.title);
+                        }
+                      });
+                      const tEl = document.querySelector('title');
+                      if (tEl) observer.observe(tEl, { childList: true, characterData: true, subtree: true });
+                      else observer.observe(document.head || document.documentElement, { childList: true, subtree: true });
+                      setTimeout(() => { observer.disconnect(); res(document.title); }, 2500);
+                    });
+                  }
+                });
+                const liveTitle = scriptRes && scriptRes[0] ? scriptRes[0].result : tab.title;
+                globalTitleCache.set(targetId, liveTitle);
+                resolve({ tabId: tab.id, url: tab.url, title: liveTitle });
+              } catch (err) {
+                resolve({ tabId: tab.id, url: tab.url, title: tab.title });
+              }
+            }
+          };
+          
+          chrome.tabs.onUpdated.addListener(listener);
+          
+          // Safety fallback: resolve if the page doesn't fire 'complete' within 15s
+          setTimeout(async () => {
+            chrome.tabs.onUpdated.removeListener(listener);
+            try {
+              const tab = await chrome.tabs.get(targetId);
+              resolve({ tabId: tab.id, url: tab.url });
+            } catch (e) {
+              resolve({ tabId: targetId, url });
+            }
+          }, 15000);
+        } catch (err) {
+          reject(err);
+        }
+      });
     }
 
     case 'switch_tab': {
       const targetId = await resolveTabId(params.tabId);
       const tab = await chrome.tabs.update(targetId, { active: true });
       await chrome.windows.update(tab.windowId, { focused: true });
+      if (tab.status === 'loading') {
+        await new Promise(resolve => {
+          const listener = (uTabId, info) => {
+            if (uTabId === targetId && info.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+          setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 15000);
+        });
+      }
       return { success: true, tabId: targetId };
     }
 
