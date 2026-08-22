@@ -185,94 +185,32 @@ class TabMedia:
 
     def status(self) -> Dict[str, Any]:
         """Fetch real-time media player state via HTML5 Video/Audio & MediaSession APIs."""
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-
-            const media = findMediaElement();
-            const session = navigator.mediaSession;
-            return {{
-                found: !!media,
-                paused: media ? media.paused : null,
-                currentTime: media ? media.currentTime : null,
-                duration: media ? media.duration : null,
-                volume: media ? media.volume : null,
-                muted: media ? media.muted : null,
-                title: session?.metadata?.title || document.title,
-                artist: session?.metadata?.artist || "",
-                album: session?.metadata?.album || "",
-                playbackState: session?.playbackState || (media ? (media.paused ? "paused" : "playing") : "none")
-            }};
-        }})()
-        """
+        js = DomCompiler.compile_media_control("status")
         return self._tab.eval_js(js) or {}
 
     def toggle(self) -> Dict[str, Any]:
         """Toggle play/pause on the active media element."""
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-            const media = findMediaElement();
-            if (!media) return {{success: false, error: "No media element found"}};
-            if (media.paused) {{
-                media.play();
-                return {{success: true, action: "played"}};
-            }} else {{
-                media.pause();
-                return {{success: true, action: "paused"}};
-            }}
-        }})()
-        """
+        js = DomCompiler.compile_media_control("toggle")
         return self._tab.eval_js(js) or {}
 
     def play(self) -> Dict[str, Any]:
         """Resume playback on the active media element."""
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-            const v = findMediaElement();
-            if (v) {{ v.play(); return {{success: true}}; }}
-            return {{success: false, error: "No media element found"}};
-        }})()
-        """
+        js = DomCompiler.compile_media_control("play")
         return self._tab.eval_js(js) or {}
 
     def pause(self) -> Dict[str, Any]:
         """Pause playback on the active media element."""
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-            const v = findMediaElement();
-            if (v) {{ v.pause(); return {{success: true}}; }}
-            return {{success: false, error: "No media element found"}};
-        }})()
-        """
+        js = DomCompiler.compile_media_control("pause")
         return self._tab.eval_js(js) or {}
 
     def seek(self, seconds: float) -> Dict[str, Any]:
         """Seek relative (+/- seconds) or step playback time."""
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-            const v = findMediaElement();
-            if (!v) return {{success: false, error: "No media element found"}};
-            v.currentTime += {float(seconds)};
-            return {{success: true, currentTime: v.currentTime}};
-        }})()
-        """
+        js = DomCompiler.compile_media_control("seek", seconds=seconds)
         return self._tab.eval_js(js) or {}
 
     def set_volume(self, volume: float) -> Dict[str, Any]:
         """Set media volume level between 0.0 (muted) and 1.0 (max)."""
-        volume = max(0.0, min(1.0, float(volume)))
-        js = f"""
-        (() => {{
-            {self._FIND_MEDIA_JS}
-            const v = findMediaElement();
-            if (v) {{ v.volume = {volume}; v.muted = false; return {{success: true, volume: v.volume}}; }}
-            return {{success: false, error: "No media element found"}};
-        }})()
-        """
+        js = DomCompiler.compile_media_control("set_volume", volume=volume)
         return self._tab.eval_js(js) or {}
 
 

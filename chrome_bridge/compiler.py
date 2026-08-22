@@ -230,6 +230,111 @@ class DomCompiler:
             return f"https://www.google.com/search?q={q_enc}"
 
     @classmethod
+    def compile_action_rpc(cls, action: str, **params: Any) -> Dict[str, Any]:
+        """Validate and compile structured Action RPC payload for extension coordinator dispatch."""
+        compiled_params = dict(params)
+        loc = compiled_params.get("target")
+        if loc is not None:
+            compiled_params["target"] = normalize_locator(loc)
+        return {
+            "action": action,
+            "params": compiled_params,
+        }
+
+    @classmethod
+    def compile_media_control(cls, action: str, **kwargs: Any) -> str:
+        """Generate fast-path JavaScript for HTML5 media and MediaSession control."""
+        find_js = """
+        function findMediaElement(root = document) {
+            let el = root.querySelector('video, audio');
+            if (el) return el;
+            const all = root.querySelectorAll('*');
+            for (const node of all) {
+                if (node.shadowRoot) {
+                    const nested = findMediaElement(node.shadowRoot);
+                    if (nested) return nested;
+                }
+            }
+            return null;
+        }
+        """
+        if action == "status":
+            return f"""
+            (() => {{
+                {find_js}
+                const media = findMediaElement();
+                const session = navigator.mediaSession;
+                return {{
+                    found: !!media,
+                    paused: media ? media.paused : null,
+                    currentTime: media ? media.currentTime : null,
+                    duration: media ? media.duration : null,
+                    volume: media ? media.volume : null,
+                    muted: media ? media.muted : null,
+                    title: session?.metadata?.title || document.title,
+                    artist: session?.metadata?.artist || "",
+                    album: session?.metadata?.album || "",
+                    playbackState: session?.playbackState || (media ? (media.paused ? "paused" : "playing") : "none")
+                }};
+            }})()
+            """
+        elif action == "toggle":
+            return f"""
+            (() => {{
+                {find_js}
+                const media = findMediaElement();
+                if (!media) return {{success: false, error: "No media element found"}};
+                if (media.paused) {{
+                    media.play();
+                    return {{success: true, action: "played"}};
+                }} else {{
+                    media.pause();
+                    return {{success: true, action: "paused"}};
+                }}
+            }})()
+            """
+        elif action == "play":
+            return f"""
+            (() => {{
+                {find_js}
+                const v = findMediaElement();
+                if (v) {{ v.play(); return {{success: true}}; }}
+                return {{success: false, error: "No media element found"}};
+            }})()
+            """
+        elif action == "pause":
+            return f"""
+            (() => {{
+                {find_js}
+                const v = findMediaElement();
+                if (v) {{ v.pause(); return {{success: true}}; }}
+                return {{success: false, error: "No media element found"}};
+            }})()
+            """
+        elif action == "seek":
+            sec = float(kwargs.get("seconds", 0.0))
+            return f"""
+            (() => {{
+                {find_js}
+                const v = findMediaElement();
+                if (!v) return {{success: false, error: "No media element found"}};
+                v.currentTime += {sec};
+                return {{success: true, currentTime: v.currentTime}};
+            }})()
+            """
+        elif action == "set_volume":
+            vol = max(0.0, min(1.0, float(kwargs.get("volume", 1.0))))
+            return f"""
+            (() => {{
+                {find_js}
+                const v = findMediaElement();
+                if (v) {{ v.volume = {vol}; v.muted = false; return {{success: true, volume: v.volume}}; }}
+                return {{success: false, error: "No media element found"}};
+            }})()
+            """
+        return "(() => ({}))()"
+
+    @classmethod
     def compile_extract_items_js(cls, container_selector: str, fields: Dict[str, str]) -> str:
         """Generate JavaScript payload for structured multi-field extraction across container elements."""
         return f"""

@@ -378,6 +378,16 @@ async function handleAction(action, params) {
       return await executeInPage(targetId, 'press_key', { key: params.key });
     }
 
+    case 'fill_form': {
+      const targetId = await resolveTabId(params.tabId);
+      return await executeInPage(targetId, 'fill_form', params);
+    }
+
+    case 'extract_items': {
+      const targetId = await resolveTabId(params.tabId);
+      return await executeInPage(targetId, 'extract_items', params);
+    }
+
     case 'wait_for': {
       const targetId = await resolveTabId(params.tabId);
       const res = await executeInPage(targetId, 'wait_for', {

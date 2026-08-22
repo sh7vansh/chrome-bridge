@@ -137,3 +137,35 @@ def test_dom_compiler_unified_discovery_helpers():
     assert "aria-label" in _DISCOVERY_HELPER_JS
 
 
+def test_dom_compiler_action_rpc_compilation():
+    """Verify structured Action RPC compilation and parameter normalization."""
+    rpc = DomCompiler.compile_action_rpc("click", target=14, button="right", count=2)
+    assert rpc["action"] == "click"
+    assert rpc["params"]["target"] == {"type": "ref", "refId": 14}
+    assert rpc["params"]["button"] == "right"
+    assert rpc["params"]["count"] == 2
+
+    css_rpc = DomCompiler.compile_action_rpc("type", target="#input", text="hello")
+    assert css_rpc["action"] == "type"
+    assert css_rpc["params"]["target"] == {"type": "css", "selector": "#input"}
+    assert css_rpc["params"]["text"] == "hello"
+
+
+def test_dom_compiler_media_control_compilation():
+    """Verify media control fast-path JavaScript compilation."""
+    status_js = DomCompiler.compile_media_control("status")
+    assert "findMediaElement" in status_js
+    assert "playbackState" in status_js
+
+    toggle_js = DomCompiler.compile_media_control("toggle")
+    assert "media.paused" in toggle_js
+    assert "media.play()" in toggle_js
+
+    seek_js = DomCompiler.compile_media_control("seek", seconds=15.0)
+    assert "v.currentTime += 15.0" in seek_js
+
+    vol_js = DomCompiler.compile_media_control("set_volume", volume=0.8)
+    assert "v.volume = 0.8" in vol_js
+
+
+

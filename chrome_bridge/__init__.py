@@ -31,8 +31,13 @@ from .security import (
 )
 from .transport import (
     ChromeSocketClient,
+    InProcessTransportClient,
     IpcFramingEngine,
+    NativeHostBridge,
+    NativeIpcServer,
     TransportClient,
+    cleanup_ipc_endpoints,
+    send_native_message,
 )
 from .compiler import (
     DomBatchSynthesizer,
@@ -116,7 +121,12 @@ __all__ = [
     "global_safety",
     "TransportClient",
     "ChromeSocketClient",
+    "InProcessTransportClient",
+    "NativeIpcServer",
+    "NativeHostBridge",
     "IpcFramingEngine",
+    "send_native_message",
+    "cleanup_ipc_endpoints",
     "DomCompiler",
     "DomBatchSynthesizer",
     "ReplSessionEngine",

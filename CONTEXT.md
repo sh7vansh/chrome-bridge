@@ -94,6 +94,15 @@ _Avoid_: Script runner, execution dispatcher, injection wrapper
 The in-memory memoization and cache management module within the Python REPL runtime that prevents redundant IPC roundtrips for ambient orientation headers during read-only multi-step execution.
 _Avoid_: Header cache, state memory, tab memoizer
 
+**In-Process Transport Adapter (`InProcessTransportClient`)**:
+The in-memory TransportClient Protocol adapter providing direct dispatch and test mocking without opening operating system sockets or background subprocesses.
+_Avoid_: Mock socket, test client, fake transport
+
+**Structured Action Protocol**:
+The typed action dispatch seam between the DOM Compiler and the Chrome extension Tab Execution Coordinator transmitting structured JSON parameters rather than raw interpolated JavaScript code strings.
+_Avoid_: String injector, JS payload generator, eval bridge
+
+
 
 
 ## Abstraction Seam Guarantees

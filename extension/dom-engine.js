@@ -730,6 +730,156 @@ export function inPageDOMOperation(payload) {
       return waitForUrl(pattern, timeout);
     }
 
+    case 'fill_form': {
+      const mapping = args.mapping || args.fields || {};
+      const submit = args.submit;
+      let filledCount = 0;
+      const errors = [];
+
+      function findField(key) {
+        const res = resolveTarget(key);
+        if (res && res.el && isVisible(res.el)) return res.el;
+
+        const qLower = String(key).toLowerCase();
+        const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]');
+        let best = null;
+        let bestScore = 0;
+        for (const el of inputs) {
+          if (!isVisible(el)) continue;
+          let score = 0;
+          const ph = (el.getAttribute('placeholder') || '').toLowerCase();
+          const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+          const nm = (el.getAttribute('name') || '').toLowerCase();
+          const id = (el.id || '').toLowerCase();
+          if (ph === qLower || aria === qLower || nm === qLower || id === qLower) score = 100;
+          else if (ph.includes(qLower) || aria.includes(qLower) || nm.includes(qLower)) score = 70;
+
+          if (el.id) {
+            try {
+              const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+              if (l && (l.innerText.toLowerCase() === qLower || l.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 95);
+            } catch(e) {}
+          }
+          const pLabel = el.closest('label');
+          if (pLabel && (pLabel.innerText.toLowerCase() === qLower || pLabel.innerText.toLowerCase().includes(qLower))) score = Math.max(score, 90);
+
+          if (score > bestScore) {
+            bestScore = score;
+            best = el;
+          }
+        }
+        return best;
+      }
+
+      for (const [key, value] of Object.entries(mapping)) {
+        const el = findField(key);
+        if (!el) {
+          errors.push({ field: key, error: 'Field not found' });
+          continue;
+        }
+        const tag = el.tagName.toLowerCase();
+        const type = (el.type || '').toLowerCase();
+        const role = (el.getAttribute('role') || '').toLowerCase();
+
+        if (typeof value === 'boolean') {
+          const isChecked = !!el.checked || el.getAttribute('aria-checked') === 'true';
+          if (isChecked !== value) {
+            el.click();
+          }
+        } else if (type === 'radio' || role === 'radio') {
+          el.click();
+        } else if (tag === 'select' || role === 'combobox' || Array.isArray(value)) {
+          const targetVal = String(Array.isArray(value) ? value[0] : value);
+          let foundOption = false;
+          if (el.options) {
+            for (let i = 0; i < el.options.length; i++) {
+              if (el.options[i].value === targetVal || el.options[i].text.trim() === targetVal) {
+                el.selectedIndex = i;
+                foundOption = true;
+                break;
+              }
+            }
+          }
+          if (!foundOption) el.value = targetVal;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          el.focus();
+          el.value = String(value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        filledCount++;
+      }
+
+      let submitted = false;
+      if (submit) {
+        if (typeof submit === 'string') {
+          const qLower = submit.toLowerCase();
+          const buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"], [role="button"]');
+          for (const btn of buttons) {
+            if (!isVisible(btn)) continue;
+            const name = getAccessibleName(btn).toLowerCase();
+            if (name === qLower || name.includes(qLower)) {
+              btn.click();
+              submitted = true;
+              break;
+            }
+          }
+        } else if (submit === true) {
+          const btn = document.querySelector('button[type="submit"], input[type="submit"]');
+          if (btn) {
+            btn.click();
+            submitted = true;
+          } else {
+            const form = document.querySelector('form');
+            if (form) {
+              form.requestSubmit ? form.requestSubmit() : form.submit();
+              submitted = true;
+            }
+          }
+        }
+      }
+
+      return { status: 'ok', action: 'fill_form', filledCount, totalFields: Object.keys(mapping).length, submitted, errors };
+    }
+
+    case 'extract_items': {
+      const itemSelector = args.itemSelector || args.item_selector || 'article, tr, li, .item, .card';
+      const fields = args.fields || {};
+      const items = [];
+      const nodes = document.querySelectorAll(itemSelector);
+
+      for (const node of nodes) {
+        if (!isVisible(node)) continue;
+        const record = {};
+        for (const [fieldKey, fieldQuery] of Object.entries(fields)) {
+          if (!fieldQuery) continue;
+          let subSelector = fieldQuery;
+          let attrName = null;
+          if (typeof fieldQuery === 'string' && fieldQuery.includes('@')) {
+            const parts = fieldQuery.split('@');
+            subSelector = parts[0];
+            attrName = parts[1];
+          }
+
+          let targetNode = node;
+          if (subSelector && subSelector.trim()) {
+            targetNode = node.querySelector(subSelector);
+          }
+
+          if (!targetNode) {
+            record[fieldKey] = null;
+          } else if (attrName) {
+            record[fieldKey] = targetNode.getAttribute(attrName);
+          } else {
+            record[fieldKey] = (targetNode.innerText || targetNode.textContent || '').trim();
+          }
+        }
+        items.push(record);
+      }
+      return { status: 'ok', action: 'extract_items', count: items.length, items };
+    }
+
     case 'highlight_refs': {
       const existing = document.getElementById('__ag_ref_overlay__');
       if (existing) {

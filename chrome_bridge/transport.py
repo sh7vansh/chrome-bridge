@@ -8,7 +8,7 @@ import struct
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Protocol, Tuple, Union, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union, runtime_checkable
 
 from .exceptions import (
     DEFAULT_PORT_FILE,
@@ -125,6 +125,59 @@ class TransportClient(Protocol):
         ...
 
 
+class InProcessTransportClient:
+    """In-memory TransportClient adapter for fast in-process testing and mock execution.
+
+    Allows executing against an in-process mock handler or stateful test dispatcher
+    without spawning background processes or opening OS sockets.
+    """
+
+    def __init__(
+        self,
+        handler: Optional[Callable[[str, Optional[Dict[str, Any]]], Any]] = None,
+        auto_snapshot: Optional[str] = None,
+    ):
+        self.handler = handler
+        self.auto_snapshot = auto_snapshot
+        self.connected = False
+        self.calls: List[Tuple[str, Optional[Dict[str, Any]]]] = []
+
+    def connect(self, retries: int = 5, backoff: float = 0.2) -> None:
+        """Establish in-memory transport connection."""
+        self.connected = True
+
+    def close(self) -> None:
+        """Close in-memory transport connection."""
+        self.connected = False
+
+    def call(self, action: str, params: Optional[Dict[str, Any]] = None, timeout: float = 15.0) -> Any:
+        """Dispatch action to in-process handler with error decoding."""
+        self.connected = True
+        self.calls.append((action, params))
+
+        if self.handler is None:
+            if action == "list_tabs":
+                return [{"id": 1, "title": "In-Process Tab", "url": "https://example.com", "active": True}]
+            if action == "get_active_tab":
+                return {"id": 1, "title": "In-Process Tab", "url": "https://example.com", "active": True}
+            if action == "get_page_content":
+                return {"snapshot": 'PAGE: "In-Process Tab"\n- button [#1] "Submit"'}
+            return {"status": "ok", "action": action}
+
+        resp = self.handler(action, params)
+        if isinstance(resp, dict):
+            if resp.get("success") is False or "error" in resp:
+                from .compiler import DomCompiler
+                DomCompiler.decode_error(
+                    err_data=resp.get("error"),
+                    params=params,
+                    auto_snapshot=resp.get("auto_snapshot", self.auto_snapshot),
+                )
+            if "result" in resp and "success" in resp:
+                return resp["result"]
+        return resp
+
+
 class ChromeSocketClient:
     """Synchronous IPC client for Chrome Bridge native host."""
 
@@ -234,3 +287,217 @@ class ChromeSocketClient:
             params=params,
             auto_snapshot=resp.get("auto_snapshot"),
         )
+
+
+# Global map of pending client requests: request_id -> asyncio.StreamWriter
+pending_requests: Dict[int, Any] = {}
+
+
+def send_native_message(obj: dict, stream: Optional[Any] = None) -> None:
+    """Encode and write a 4-byte little-endian length-prefixed JSON message to Chrome stdout."""
+    try:
+        IpcFramingEngine.write_native_message(obj, stream=stream)
+    except Exception:
+        # Chrome pipe may have closed
+        pass
+
+
+def cleanup_ipc_endpoints(socket_path: str = SOCKET_PATH, port_file: Optional[str] = None) -> None:
+    """Remove temporary socket or port file on host exit."""
+    target_port = port_file if port_file is not None else DEFAULT_PORT_FILE
+    try:
+        if sys.platform == "win32" or os.name == "nt":
+            if os.path.exists(target_port):
+                os.remove(target_port)
+        else:
+            if os.path.exists(socket_path):
+                os.remove(socket_path)
+    except Exception:
+        pass
+
+
+class NativeIpcServer:
+    """Manages stdio communication with Chrome and local IPC server for AI clients."""
+
+    def __init__(
+        self,
+        loop: Any,
+        stdin_stream: Optional[Any] = None,
+        auto_read_stdin: bool = True,
+        socket_path: str = SOCKET_PATH,
+        port_file: Optional[str] = None,
+    ):
+        import asyncio
+        self.loop = loop
+        self.stdin_stream = stdin_stream if stdin_stream is not None else sys.stdin.buffer
+        self.auto_read_stdin = auto_read_stdin
+        self.socket_path = socket_path
+        self.port_file = port_file if port_file is not None else DEFAULT_PORT_FILE
+        self.msg_queue: asyncio.Queue[Optional[Any]] = asyncio.Queue()
+        self.stop_event = threading.Event()
+        self.server: Optional[Any] = None
+        self._reader_thread: Optional[threading.Thread] = None
+
+    def _stdin_reader_thread(self) -> None:
+        """Background thread reading length-prefixed messages from Chrome stdin."""
+        stdin = self.stdin_stream
+        while not self.stop_event.is_set():
+            payload = IpcFramingEngine.read_length_prefixed_bytes(stdin)
+            if payload is None:
+                break
+            self.loop.call_soon_threadsafe(self.msg_queue.put_nowait, payload)
+
+        # Signal EOF to asyncio loop
+        self.loop.call_soon_threadsafe(self.msg_queue.put_nowait, None)
+
+    async def _handle_chrome_messages(self) -> None:
+        """Process messages received from Chrome and route responses to waiting clients."""
+        while True:
+            item = await self.msg_queue.get()
+            if item is None:
+                # Chrome closed stdin
+                break
+
+            try:
+                if isinstance(item, (bytes, bytearray)):
+                    msg_str = item.decode("utf-8", errors="replace")
+                    response = json.loads(msg_str)
+                else:
+                    response = item
+
+                req_id = response.get("id")
+
+                if req_id is not None and req_id in pending_requests:
+                    writer = pending_requests.pop(req_id)
+                    try:
+                        if not writer.is_closing():
+                            writer.write((json.dumps(response) + "\n").encode("utf-8"))
+                            await writer.drain()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # If Chrome stdin closed, shut down server
+        self.shutdown()
+
+    async def handle_client_connection(self, reader: Any, writer: Any) -> None:
+        """Handle incoming connection from an MCP or Python SDK client."""
+        client_buffer = b""
+        try:
+            while not self.stop_event.is_set():
+                chunk = await reader.read(65536)
+                if not chunk:
+                    break
+                client_buffer += chunk
+
+                messages, client_buffer = IpcFramingEngine.unpack_line_delimited_buffer(client_buffer, on_error="error_dict")
+                for req in messages:
+                    if req.get("__parse_error__"):
+                        err_resp = {"success": False, "error": "Invalid JSON request"}
+                        writer.write((json.dumps(err_resp) + "\n").encode("utf-8"))
+                        await writer.drain()
+                        continue
+                    req_id = req.get("id")
+                    if req_id is not None:
+                        pending_requests[req_id] = writer
+                        send_native_message(req)
+        except Exception:
+            pass
+        finally:
+            # Clean up pending requests registered by this writer
+            for r_id, w in list(pending_requests.items()):
+                if w is writer:
+                    pending_requests.pop(r_id, None)
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    async def start(self) -> None:
+        """Start the IPC server and Chrome message dispatch loop."""
+        import asyncio
+        cleanup_ipc_endpoints(self.socket_path, self.port_file)
+
+        is_win = sys.platform == "win32" or os.name == "nt"
+
+        if is_win:
+            self.server = await asyncio.start_server(
+                self.handle_client_connection,
+                host="127.0.0.1",
+                port=0,
+            )
+            sockets = self.server.sockets
+            if sockets:
+                port = sockets[0].getsockname()[1]
+                with open(self.port_file, "w", encoding="utf-8") as f:
+                    f.write(str(port))
+                send_native_message({"event": "host_ready", "port": port})
+        else:
+            self.server = await asyncio.start_unix_server(
+                self.handle_client_connection,
+                path=self.socket_path,
+            )
+            send_native_message({"event": "host_ready", "socketPath": self.socket_path})
+
+        # Start background thread for stdin reading if enabled
+        if self.auto_read_stdin:
+            self._reader_thread = threading.Thread(target=self._stdin_reader_thread, daemon=True)
+            self._reader_thread.start()
+
+        # Run Chrome message processing
+        await self._handle_chrome_messages()
+
+    def shutdown(self) -> None:
+        """Gracefully shut down the bridge."""
+        self.stop_event.set()
+        if self.server:
+            self.server.close()
+        cleanup_ipc_endpoints(self.socket_path, self.port_file)
+
+    @classmethod
+    def run_main(cls) -> None:
+        """CLI entrypoint for Chrome Bridge Native Host."""
+        import asyncio
+        import atexit
+        import signal
+
+        # Ensure unbuffered binary I/O for stdio framing on Windows
+        if sys.platform == "win32":
+            try:
+                import msvcrt
+                msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+                msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+            except Exception:
+                pass
+
+        atexit.register(cleanup_ipc_endpoints)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        bridge = cls(loop)
+
+        def _signal_handler(*args: Any) -> None:
+            bridge.shutdown()
+            cleanup_ipc_endpoints()
+            sys.exit(0)
+
+        try:
+            signal.signal(signal.SIGINT, _signal_handler)
+            signal.signal(signal.SIGTERM, _signal_handler)
+        except Exception:
+            pass
+
+        try:
+            loop.run_until_complete(bridge.start())
+        except KeyboardInterrupt:
+            pass
+        finally:
+            bridge.shutdown()
+            cleanup_ipc_endpoints()
+
+
+# Backward-compatible alias
+NativeHostBridge = NativeIpcServer
+

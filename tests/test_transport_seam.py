@@ -89,3 +89,55 @@ def test_ipc_framing_engine_line_delimited_roundtrip():
     assert msgs_partial[0] == msg1
     assert rem_partial == b'{"id": 3, "action": '
 
+
+def test_in_process_transport_client_built_in_adapter():
+    from chrome_bridge.transport import InProcessTransportClient
+    from chrome_bridge.exceptions import ElementNotFoundError
+
+    # Test default fallback handler
+    client = InProcessTransportClient()
+    assert isinstance(client, TransportClient)
+    client.connect()
+    assert client.connected is True
+
+    tabs = client.call("list_tabs")
+    assert isinstance(tabs, list)
+    assert tabs[0]["title"] == "In-Process Tab"
+
+    # Test custom handler with error decoding
+    def mock_dispatcher(action: str, params: Optional[Dict[str, Any]]):
+        if action == "click":
+            return {
+                "success": False,
+                "error": {
+                    "code": "ELEMENT_NOT_FOUND",
+                    "target": "[#99]",
+                    "message": "Element [#99] not found",
+                },
+                "auto_snapshot": 'PAGE: "Error Page"\n- button [#1] "Submit"',
+            }
+        return {"success": True, "result": {"navigated": True}}
+
+    err_client = InProcessTransportClient(handler=mock_dispatcher)
+    with pytest.raises(ElementNotFoundError) as exc_info:
+        err_client.call("click", {"target": {"type": "ref", "refId": 99}})
+
+    assert exc_info.value.target == "[#99]"
+    assert 'PAGE: "Error Page"' in (exc_info.value.auto_snapshot or "")
+
+    res = err_client.call("navigate", {"url": "https://example.com"})
+    assert res == {"navigated": True}
+    client.close()
+    assert client.connected is False
+
+
+def test_native_ipc_server_facade_and_exports():
+    import native_host
+    from chrome_bridge.transport import NativeIpcServer, NativeHostBridge
+
+    assert native_host.NativeIpcServer is NativeIpcServer
+    assert native_host.NativeHostBridge is NativeHostBridge
+    assert hasattr(native_host, "send_native_message")
+    assert hasattr(native_host, "cleanup_ipc_endpoints")
+
+
